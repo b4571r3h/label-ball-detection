@@ -2,16 +2,15 @@ name: CI-CD
 
 on:
   push:
-    branches: [ "main" ]   # läuft bei jedem Push auf main
-  workflow_dispatch:        # manuell startbar
+    branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write           # nötig für GHCR push
+  packages: write
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE: ghcr.io/${{ github.repository }}:latest   # ghcr.io/<owner>/<repo>:latest
+  IMAGE: ghcr.io/${{ github.repository }}:latest
 
 jobs:
   build-and-push:
@@ -24,11 +23,13 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}  # reicht in 99% der Fälle
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Push image
+      - name: Build & Push image (subfolder)
         uses: docker/build-push-action@v6
         with:
+          context: ./ball-web-labeler-subpath
+          file: ./ball-web-labeler-subpath/Dockerfile
           push: true
           tags: ${{ env.IMAGE }}
 
@@ -48,17 +49,16 @@ jobs:
           PORT:        ${{ secrets.IONOS_SSH_PORT || '22' }}
           PROJECT_DIR: ${{ secrets.PROJECT_DIR }}
           IMAGE:       ${{ env.IMAGE }}
-          # Falls dein GHCR-Package privat ist, setze ein PAT als GHCR_TOKEN.
-          GHCR_TOKEN:  ${{ secrets.GHCR_TOKEN }}
+          GHCR_TOKEN:  ${{ secrets.GHCR_TOKEN }}   # nur nötig, wenn GHCR privat
           GHCR_USER:   ${{ github.actor }}
         run: |
-          ssh -o StrictHostKeyChecking=no -p "$PORT" "$USER@$HOST" bash -lc "
+          ssh -o StrictHostKeyChecking=no -p "$PORT" "$USER@$HOST" bash -lc '
             set -e
-            cd \"$PROJECT_DIR\"
-            if [ -n \"$GHCR_TOKEN\" ]; then
-              docker login ghcr.io -u \"$GHCR_USER\" -p \"$GHCR_TOKEN\"
+            cd "$PROJECT_DIR"
+            if [ -n "$GHCR_TOKEN" ]; then
+              docker login ghcr.io -u "$GHCR_USER" -p "$GHCR_TOKEN"
             fi
             docker compose -f compose.deploy.yaml pull
             docker compose -f compose.deploy.yaml up -d --remove-orphans
-            docker image prune -af --filter 'until=168h' || true
-          "
+            docker image prune -af --filter "until=168h" || true
+          '
