@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   labeler:
     image: ghcr.io/b4571r3h/label-ball-detection:latest
