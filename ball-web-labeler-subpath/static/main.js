@@ -1,153 +1,283 @@
-const qs = (s)=>document.querySelector(s);
-const dropZone = qs('#dropZone');
-const fileInput = qs('#fileInput');
-const uploadBtn = qs('#uploadBtn');
-const fpsInput = qs('#fpsInput');
-const nameInput = qs('#nameInput');
-const ytUrl = qs('#ytUrl');
-const fpsYT = qs('#fpsYT');
-const nameYT = qs('#nameYT');
-const ytBtn = qs('#ytBtn');
-const ingestStatus = qs('#ingestStatus');
+// ----- Config / Helpers ------------------------------------------------------
+const APP_ROOT =
+  (window.__APP_ROOT && window.__APP_ROOT.replace(/\/$/, "")) ||
+  (document.querySelector('meta[name="app-root"]')?.content || "").replace(/\/$/, "");
 
-const labelCard = qs('#labelCard');
-const taskIdEl = qs('#taskId');
-const frameCountEl = qs('#frameCount');
-const frameImg = qs('#frameImg');
-const cross = qs('#crosshair');
-const boxSize = qs('#boxSize');
-const prevBtn = qs('#prevBtn');
-const nextBtn = qs('#nextBtn');
-const skipBtn = qs('#skipBtn');
-const labelStatus = qs('#labelStatus');
-const exportBtn = qs('#exportBtn');
+const API = (p) => `${APP_ROOT}/api${p}`;
+const el = (q) => document.querySelector(q);
+const on = (target, ev, fn, opts) => target.addEventListener(ev, fn, opts);
 
-let TASK_ID = null;
-let FRAMES = [];
-let IDX = 0;
-
-function setStatus(el, msg) { el.textContent = msg; }
-
-async function ingestUpload() {
-  const f = fileInput.files?.[0];
-  if (!f) { alert('Bitte eine Videodatei wählen.'); return; }
-  const fd = new FormData();
-  fd.append('video', f);
-  fd.append('fps', fpsInput.value || '5');
-  if (nameInput.value) fd.append('task_name', nameInput.value);
-  setStatus(ingestStatus, 'Upload & Extrahiere Frames ...');
-  const res = await fetch('api/ingest/upload', { method:'POST', body:fd });
-  const text = await res.text();
-  if (!res.ok) { setStatus(ingestStatus, `Fehler beim Upload: ${text}`); return; }
-  const js = JSON.parse(text);
-  TASK_ID = js.task_id; await loadFrames();
+function toast(msg, type = "info") {
+  const box = el("#toast") || (() => {
+    const d = document.createElement("div");
+    d.id = "toast";
+    d.style.position = "fixed";
+    d.style.left = "50%";
+    d.style.transform = "translateX(-50%)";
+    d.style.bottom = "20px";
+    d.style.padding = "10px 14px";
+    d.style.borderRadius = "10px";
+    d.style.background = "#1f2937";
+    d.style.color = "white";
+    d.style.fontSize = "14px";
+    d.style.zIndex = "9999";
+    d.style.boxShadow = "0 6px 24px rgba(0,0,0,.25)";
+    document.body.appendChild(d);
+    return d;
+  })();
+  box.textContent = msg;
+  box.style.background = type === "error" ? "#b91c1c" : (type === "ok" ? "#065f46" : "#1f2937");
+  box.style.opacity = "1";
+  setTimeout(() => box.style.opacity = "0", 2200);
 }
 
-async function ingestYT() {
-  const url = ytUrl.value.trim();
-  if (!url) { alert('Bitte YouTube-URL eintragen.'); return; }
-  setStatus(ingestStatus, 'Lade YouTube-Video & extrahiere Frames ...');
-  const payload = { youtube_url: url, fps: Number(fpsYT.value||5) };
-  if (nameYT.value) payload.task_name = nameYT.value;
-  const res = await fetch('api/ingest/youtube', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-  const text = await res.text();
-  if (!res.ok) { setStatus(ingestStatus, `Fehler bei YouTube-Ingest: ${text}`); return; }
-  const js = JSON.parse(text);
-  TASK_ID = js.task_id; await loadFrames();
+function fmtErr(e) {
+  if (!e) return "Unbekannter Fehler";
+  if (typeof e === "string") return e;
+  try { return JSON.stringify(e); } catch { return String(e); }
 }
 
-async function loadFrames() {
-  const res = await fetch(`api/task/${encodeURIComponent(TASK_ID)}/frames?split=train`);
-  const js = await res.json();
-  FRAMES = js.frames || [];
-  frameCountEl.textContent = FRAMES.length;
-  taskIdEl.textContent = TASK_ID;
-  labelCard.style.display = 'block';
-  setStatus(ingestStatus, `Task: ${TASK_ID} – ${FRAMES.length} Frames`);
-  IDX = 0; showFrame();
+function qsv(obj) { // query string
+  return Object.entries(obj)
+    .filter(([,v]) => v !== undefined && v !== null && v !== "")
+    .map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
 }
 
-function showFrame() {
-  if (!FRAMES.length) return;
-  const fname = FRAMES[IDX];
-  frameImg.src = `api/task/${encodeURIComponent(TASK_ID)}/frame/${encodeURIComponent(fname)}?split=train`;
-  cross.style.display = 'none';
-  labelStatus.textContent = `Frame ${IDX+1} / ${FRAMES.length}`;
+// ----- UI Elements -----------------------------------------------------------
+const $fileInput = el("#fileInput");
+const $fpsInput = el("#fpsInput");
+const $taskInput = el("#taskInput");
+const $uploadBtn = el("#uploadBtn");
+
+const $ytUrl = el("#ytUrl");
+const $ytFps = el("#ytFps");
+const $ytTask = el("#ytTask");
+const $ingestBtn = el("#ingestBtn");
+
+const $img = el("#frameImg");
+const $boxPx = el("#boxPx");
+const $prev = el("#prevBtn");
+const $skip = el("#skipBtn");
+const $next = el("#nextBtn");
+const $export = el("#exportBtn");
+const $status = el("#status");
+
+const $drop = el("#dropArea");
+
+// ----- State -----------------------------------------------------------------
+let state = {
+  task: "",
+  idx: 0,
+  total: 0,
+  saving: false
+};
+
+// ----- Frame Handling --------------------------------------------------------
+async function loadTaskInfo(task) {
+  // Backend liefert Frames-Anzahl unter /api/tasks?task=...
+  const r = await fetch(API(`/tasks?${qsv({ task })}`));
+  if (!r.ok) throw new Error("Konnte Task-Info nicht laden");
+  const data = await r.json();
+  // Erwartet: { task:"...", frames: N }  – fallback falls anderes Format:
+  state.task = data.task || task;
+  state.total = data.frames ?? (data.count ?? 0);
+  state.idx = 0;
+  renderStatus();
 }
 
-function imgPointToPixelFromClient(clientX, clientY) {
-  const rect = frameImg.getBoundingClientRect();
-  const x = clientX - rect.left; const y = clientY - rect.top;
-  const scaleX = frameImg.naturalWidth / rect.width;
-  const scaleY = frameImg.naturalHeight / rect.height;
-  return { x: x * scaleX, y: y * scaleY, sx: x, sy: y };
+async function showFrame() {
+  if (!state.task) return;
+  // Cache-Busting via Zeitstempel
+  const src = API(`/frame?${qsv({ task: state.task, idx: state.idx })}`) + `&t=${Date.now()}`;
+  $img.src = src;
+  renderStatus();
 }
 
-function saveLabelFromPoint(px) {
-  if (!FRAMES.length) return;
-  cross.style.left = `${px.sx}px`; cross.style.top = `${px.sy}px`; cross.style.display = 'block';
-  const fname = FRAMES[IDX];
-  const body = { image: fname, cx: px.x, cy: px.y, box_px: Number(boxSize.value||24), split: 'train' };
-  fetch(`api/task/${encodeURIComponent(TASK_ID)}/label`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
-    .then(async (r) => {
-      if (r.ok) {
-        labelStatus.textContent = `Gespeichert: ${fname}`;
-        nextFrame();
-      } else {
-        const t = await r.text();
-        labelStatus.textContent = `Fehler beim Speichern: ${t}`;
-      }
+function renderStatus() {
+  if (!state.task) {
+    $status.textContent = "–";
+  } else {
+    $status.textContent = `Task: ${state.task} | Frame ${state.idx + 1} / ${state.total}`;
+  }
+}
+
+async function goto(delta) {
+  if (!state.task || state.total <= 0) return;
+  state.idx = Math.max(0, Math.min(state.total - 1, state.idx + delta));
+  await showFrame();
+}
+
+// ----- Save Annotation -------------------------------------------------------
+async function savePoint(px, py) {
+  if (state.saving || !state.task) return;
+  state.saving = true;
+  try {
+    const body = {
+      task: state.task,
+      idx: state.idx,
+      x: px,
+      y: py,
+      box: parseInt($boxPx.value || "24", 10)
+    };
+    const r = await fetch(API("/save"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
     });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(fmtErr(err.detail || err || r.statusText));
+    }
+    toast("Gespeichert ✓", "ok");
+    // automatisch zum nächsten Frame
+    await goto(+1);
+  } catch (e) {
+    toast(`Speichern fehlgeschlagen: ${fmtErr(e)}`, "error");
+  } finally {
+    state.saving = false;
+  }
 }
 
-// Desktop click
-frameImg.addEventListener('click', (ev)=>{
-  const p = imgPointToPixelFromClient(ev.clientX, ev.clientY);
-  saveLabelFromPoint(p);
-});
-
-// Mobile touch
-frameImg.addEventListener('touchstart', (ev)=>{
-  if (!ev.changedTouches || !ev.changedTouches[0]) return;
-  const t = ev.changedTouches[0];
-  const p = imgPointToPixelFromClient(t.clientX, t.clientY);
-  saveLabelFromPoint(p);
-  ev.preventDefault();
-}, {passive:false});
-
-async function skipFrame() {
-  if (!FRAMES.length) return;
-  const fname = FRAMES[IDX];
-  const res = await fetch(`api/task/${encodeURIComponent(TASK_ID)}/skip`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ image: fname, split:'train' }) });
-  if (res.ok) { labelStatus.textContent = `Skipped: ${fname}`; nextFrame(); }
-  else { labelStatus.textContent = 'Skip fehlgeschlagen'; }
+// Klick / Touch → (x, y) im Bildkoords
+function imagePointFromEvent(ev) {
+  const rect = $img.getBoundingClientRect();
+  let clientX, clientY;
+  if (ev.touches && ev.touches[0]) {
+    clientX = ev.touches[0].clientX; clientY = ev.touches[0].clientY;
+  } else {
+    clientX = ev.clientX; clientY = ev.clientY;
+  }
+  const x = Math.round((clientX - rect.left) * ($img.naturalWidth / rect.width));
+  const y = Math.round((clientY - rect.top)  * ($img.naturalHeight / rect.height));
+  return { x, y };
 }
 
-function prevFrame(){ if (IDX>0){ IDX--; showFrame(); } }
-function nextFrame(){ if (IDX<FRAMES.length-1){ IDX++; showFrame(); } }
-
-uploadBtn.addEventListener('click', ingestUpload);
-ytBtn.addEventListener('click', ingestYT);
-prevBtn.addEventListener('click', prevFrame);
-nextBtn.addEventListener('click', nextFrame);
-skipBtn.addEventListener('click', skipFrame);
-
-window.addEventListener('keydown', (e)=>{
-  if (!labelCard.style.display || labelCard.style.display==='none') return;
-  if (e.key==='a' || e.key==='A') prevFrame();
-  if (e.key==='d' || e.key==='D') nextFrame();
-  if (e.key==='s' || e.key==='S') skipFrame();
+on($img, "click", (e) => {
+  if (!state.task) return;
+  const { x, y } = imagePointFromEvent(e);
+  savePoint(x, y);
 });
 
-['dragenter','dragover','dragleave','drop'].forEach(ev=>{
-  dropZone.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); });
-});
-dropZone.addEventListener('drop', (e)=>{
-  const dt = e.dataTransfer; if (!dt?.files?.length) return;
-  fileInput.files = dt.files; ingestStatus.textContent = `${dt.files[0].name} gewählt.`;
+on($img, "touchstart", (e) => {
+  if (!state.task) return;
+  const { x, y } = imagePointFromEvent(e);
+  e.preventDefault();
+  savePoint(x, y);
+}, { passive: false });
+
+// ----- Upload: Datei ---------------------------------------------------------
+async function doUpload(file, fps, task) {
+  if (!file) throw new Error("Bitte eine Videodatei wählen.");
+  const fd = new FormData();
+  // Feldname MUSS 'file' heißen (Server erwartet das so)
+  fd.append("file", file);
+  if (fps) fd.append("fps", String(fps));
+  if (task) fd.append("task", String(task));
+
+  const r = await fetch(API("/ingest/upload"), { method: "POST", body: fd });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(fmtErr(err.detail || err || r.statusText));
+  }
+  const data = await r.json();
+  // Erwartet: { ok:true, task, frames }
+  await loadTaskInfo(data.task);
+  await showFrame();
+  toast(`Upload & Extract OK: ${data.task} (${state.total} Frames)`, "ok");
+}
+
+on($uploadBtn, "click", async () => {
+  try {
+    const fps = parseInt($fpsInput.value || "0", 10) || undefined;
+    const task = ($taskInput.value || "").trim() || undefined;
+    await doUpload($fileInput.files?.[0], fps, task);
+  } catch (e) {
+    toast(`Fehler beim Upload: ${fmtErr(e)}`, "error");
+  }
 });
 
-exportBtn.addEventListener('click', ()=>{
-  if (!TASK_ID) return;
-  window.location.href = `api/task/${encodeURIComponent(TASK_ID)}/export`;
+// Drag & Drop
+;["dragenter","dragover"].forEach(ev =>
+  on($drop, ev, (e) => { e.preventDefault(); $drop.classList.add("drag"); })
+);
+;["dragleave","drop"].forEach(ev =>
+  on($drop, ev, (e) => { e.preventDefault(); $drop.classList.remove("drag"); })
+);
+on($drop, "drop", async (e) => {
+  try {
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    const fps = parseInt($fpsInput.value || "0", 10) || undefined;
+    const task = ($taskInput.value || "").trim() || undefined;
+    await doUpload(file, fps, task);
+  } catch (err) {
+    toast(`Fehler beim Upload: ${fmtErr(err)}`, "error");
+  }
 });
+
+// ----- Upload: YouTube -------------------------------------------------------
+on($ingestBtn, "click", async () => {
+  try {
+    const url = ($ytUrl.value || "").trim();
+    if (!url) throw new Error("Bitte YouTube-URL eingeben.");
+    const fps = parseInt($ytFps.value || "0", 10) || undefined;
+    const task = ($ytTask.value || "").trim() || undefined;
+
+    const r = await fetch(API("/ingest/youtube"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, fps, task })
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(fmtErr(err.detail || err || r.statusText));
+    }
+    const data = await r.json();
+    await loadTaskInfo(data.task);
+    await showFrame();
+    toast(`YouTube ingest OK: ${data.task} (${state.total} Frames)`, "ok");
+  } catch (e) {
+    toast(`Fehler bei YouTube-Ingest: ${fmtErr(e)}`, "error");
+  }
+});
+
+// ----- Navigation / Export ---------------------------------------------------
+on($prev, "click", () => goto(-1));
+on($next, "click", () => goto(+1));
+on($skip, "click", () => goto(+1));
+on($export, "click", () => {
+  if (!state.task) return toast("Kein Task aktiv.", "error");
+  // Direktes Herunterladen (der Browser lädt das ZIP)
+  const url = API(`/export?${qsv({ task: state.task })}`) + `&t=${Date.now()}`;
+  window.location.href = url;
+});
+
+// Keyboard: A / S / D
+on(window, "keydown", (e) => {
+  if (!state.task) return;
+  const k = e.key.toLowerCase();
+  if (k === "a") goto(-1);
+  if (k === "s") goto(+1);
+  if (k === "d") { // D = Klick simulieren (Mitte)
+    // Markiert Mitte des Bildes – praktisch am Desktop
+    const x = Math.round(($img.naturalWidth || $img.width) / 2);
+    const y = Math.round(($img.naturalHeight || $img.height) / 2);
+    savePoint(x, y);
+  }
+});
+
+// ----- Initial ---------------------------------------------------------------
+(async function init() {
+  // Optional: Task aus URL übernehmen ?task=XYZ
+  const url = new URL(location.href);
+  const t = url.searchParams.get("task");
+  if (t) {
+    try {
+      await loadTaskInfo(t);
+      await showFrame();
+    } catch {
+      // ignorieren
+    }
+  }
+  renderStatus();
+})();
