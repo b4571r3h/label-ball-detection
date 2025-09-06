@@ -1,0 +1,9 @@
+YOUR.DOMAIN {
+    encode gzip
+    handle_path /ball-detection/* {
+        reverse_proxy labeler:8000
+    }
+    handle {
+        respond "Not found" 404
+    }
+}
