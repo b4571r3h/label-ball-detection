@@ -1,0 +1,12 @@
+services:
+  labeler:
+    image: ghcr.io/<OWNER>/<REPO>:latest
+    container_name: tt-ball-labeler
+    environment:
+      - LABEL_DATA_DIR=/data
+      - APP_ROOT_PATH=/ball-detection   # App unter Subpfad
+    volumes:
+      - ./data:/data
+    ports:
+      - "80:8000"   # HTTP auf Port 80
+    restart: unless-stopped
