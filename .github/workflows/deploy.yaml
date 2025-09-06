@@ -4,10 +4,6 @@ on:
   push:
     branches: [ main ]
 
-env:
-  IMAGE: ghcr.io/b4571r3h/label-ball-detection:latest
-  CONTEXT: ./ball-web-labeler-subpath
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -17,24 +13,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Login GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build & Push image
         uses: docker/build-push-action@v6
         with:
-          context: ${{ env.CONTEXT }}
+          context: ./ball-web-labeler-subpath
+          file: ./ball-web-labeler-subpath/Dockerfile
           push: true
-          tags: ${{ env.IMAGE }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}
-          cache-to: type=inline
+          tags: ghcr.io/${{ github.repository_owner }}/label-ball-detection:latest
 
   deploy:
     needs: build-and-push
@@ -45,25 +39,45 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.IONOS_SSH_KEY }}
 
-      - name: Deploy to IONOS
+      - name: Sanity check secrets
+        env:
+          HOST: ${{ secrets.IONOS_HOST }}
+          USERNAME: ${{ secrets.IONOS_USER }}
+          PORT: ${{ secrets.IONOS_PORT }}
         run: |
-          ssh -o StrictHostKeyChecking=no -p "${{ secrets.PORT }}" "${{ secrets.USER }}@${{ secrets.HOST }}" '
-            set -e
-            cd /root/apps/ball-web-labeler
-            echo "PWD=$(pwd)"; ls -la
+          [ -n "$HOST" ] || { echo "Missing IONOS_HOST secret"; exit 1; }
+          [ -n "$USERNAME" ] || { echo "Missing IONOS_USER secret"; exit 1; }
+          PORT=${PORT:-22}
+          echo "Will deploy to $HOST:$PORT as $USERNAME"
 
-            # GHCR Login (falls Image privat ist; schadet nicht, wenn öffentlich)
-            docker login ghcr.io -u "${GITHUB_ACTOR}" -p "${GHCR_TOKEN}" || true
+      - name: Deploy to IONOS
+        env:
+          HOST: ${{ secrets.IONOS_HOST }}
+          USERNAME: ${{ secrets.IONOS_USER }}
+          PORT: ${{ secrets.IONOS_PORT }}
+        run: |
+          set -e
+          PORT=${PORT:-22}
+          ssh -o StrictHostKeyChecking=no -p "$PORT" "$USERNAME@$HOST" bash -lc '
+            set -e
+            mkdir -p /root/apps/ball-web-labeler
+            cd /root/apps/ball-web-labeler
+
+            cat > compose.deploy.yaml <<EOF
+            services:
+              labeler:
+                image: ghcr.io/${{ github.repository_owner }}/label-ball-detection:latest
+                container_name: tt-ball-labeler
+                environment:
+                  - LABEL_DATA_DIR=/data
+                  - APP_ROOT_PATH=/ball-detection
+                volumes:
+                  - ./data:/data
+                ports:
+                  - "80:8000"
+                restart: unless-stopped
+            EOF
 
             docker compose -f compose.deploy.yaml pull
-            docker compose -f compose.deploy.yaml up -d --remove-orphans --force-recreate
-
-            echo "--- Running containers ---"
-            docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}"
-
-            echo "--- Health ---"
-            curl -fsS -i http://localhost/ball-detection/api/health || true
+            docker compose -f compose.deploy.yaml up -d --remove-orphans
           '
-        env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
