@@ -1,0 +1,64 @@
+name: CI-CD
+
+on:
+  push:
+    branches: [ "main" ]   # läuft bei jedem Push auf main
+  workflow_dispatch:        # manuell startbar
+
+permissions:
+  contents: read
+  packages: write           # nötig für GHCR push
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}:latest   # ghcr.io/<owner>/<repo>:latest
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}  # reicht in 99% der Fälle
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.IMAGE }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.IONOS_SSH_KEY }}
+
+      - name: Deploy to IONOS
+        env:
+          HOST:        ${{ secrets.IONOS_HOST }}
+          USER:        ${{ secrets.IONOS_USER }}
+          PORT:        ${{ secrets.IONOS_SSH_PORT || '22' }}
+          PROJECT_DIR: ${{ secrets.PROJECT_DIR }}
+          IMAGE:       ${{ env.IMAGE }}
+          # Falls dein GHCR-Package privat ist, setze ein PAT als GHCR_TOKEN.
+          GHCR_TOKEN:  ${{ secrets.GHCR_TOKEN }}
+          GHCR_USER:   ${{ github.actor }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -p "$PORT" "$USER@$HOST" bash -lc "
+            set -e
+            cd \"$PROJECT_DIR\"
+            if [ -n \"$GHCR_TOKEN\" ]; then
+              docker login ghcr.io -u \"$GHCR_USER\" -p \"$GHCR_TOKEN\"
+            fi
+            docker compose -f compose.deploy.yaml pull
+            docker compose -f compose.deploy.yaml up -d --remove-orphans
+            docker image prune -af --filter 'until=168h' || true
+          "
