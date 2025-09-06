@@ -4,9 +4,9 @@ services:
     container_name: tt-ball-labeler
     environment:
       - LABEL_DATA_DIR=/data
-      - APP_ROOT_PATH=/ball-detection   # <— this is critical
+      - APP_ROOT_PATH=/ball-detection
     volumes:
-      - ./.data:/data
+      - ./data:/data
     ports:
       - "80:8000"
     restart: unless-stopped
