@@ -51,7 +51,7 @@ jobs:
           username: ${{ secrets.IONOS_USER }}
           key: ${{ secrets.IONOS_SSH_KEY }}
           port: ${{ secrets.IONOS_SSH_PORT || 22 }}
-          script: |
+          script: 
             set -e
             cd "${{ secrets.PROJECT_DIR }}"
             mkdir -p data
