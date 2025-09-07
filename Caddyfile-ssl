@@ -22,6 +22,11 @@ app.basti-reh.de {
     # Admin Panel - Redirect old double path
     redir /admin/admin/* /admin/ 302
     
+    # Admin Panel - Explicit route for root
+    handle /admin {
+        redir /admin/
+    }
+    
     # Admin Panel
     handle_path /admin/* {
         reverse_proxy tt-ball-admin:8002
