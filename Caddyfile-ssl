@@ -20,7 +20,7 @@ app.basti-reh.de {
     }
     
     # Admin Panel
-    handle /admin/* {
+    handle_path /admin/* {
         reverse_proxy tt-ball-admin:8002
     }
     
