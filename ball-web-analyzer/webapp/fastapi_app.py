@@ -413,18 +413,9 @@ def list_analyses():
     analyses.sort(key=lambda x: x.get("created", ""), reverse=True)
     return {"analyses": analyses}
 
-# ---- App-Setup für Subpath ----
-if APP_ROOT_PATH:
-    # Wrapper-App für Subpath
-    app = FastAPI()
-    app.mount(APP_ROOT_PATH, core)
-    
-    @app.get("/", include_in_schema=False)
-    def root_redirect():
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=f"{APP_ROOT_PATH}/")
-else:
-    app = core
+# ---- FastAPI App Configuration ----
+# Für Subpfad-Deployment verwenden wir root_path direkt in uvicorn
+app = core
 
 # ---- Entwicklungsserver ----
 if __name__ == "__main__":
