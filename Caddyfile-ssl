@@ -9,13 +9,19 @@ app.basti-reh.de {
     # Root-Redirect zu Ball Detection
     redir / /ball-detection/ 302
     
+    # Ball Detection Labeler - Explicit route for root
+    redir /ball-detection /ball-detection/ 302
+    
     # Ball Detection Labeler
-    handle /ball-detection/* {
+    handle_path /ball-detection/* {
         reverse_proxy tt-ball-labeler:8000
     }
     
+    # Ball Analyzer - Explicit route for root
+    redir /ball-analyzer /ball-analyzer/ 302
+    
     # Ball Analyzer
-    handle /ball-analyzer/* {
+    handle_path /ball-analyzer/* {
         reverse_proxy tt-ball-analyzer:8001
     }
     
