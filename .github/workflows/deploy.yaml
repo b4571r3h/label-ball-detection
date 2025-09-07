@@ -37,7 +37,6 @@ jobs:
           file: ${{ env.DOCKERFILE }}
           push: true
           tags: ${{ env.IMAGE }}
-          # Optionale Nachverfolgung des Builds im Container:
           build-args: |
             BUILD_SHA=${{ github.sha }}
 
@@ -45,7 +44,7 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (nur für compose.deploy.yaml)
+      - name: Checkout (für compose.deploy.yaml)
         uses: actions/checkout@v4
 
       - name: Add SSH key
@@ -76,7 +75,7 @@ jobs:
           PORT=${PORT:-22}
           ssh -o StrictHostKeyChecking=no -p "$PORT" "$USERNAME@$HOST" "mkdir -p '$REMOTE_DIR'"
 
-      - name: Copy compose.deploy.yaml to server
+      - name: Copy compose.deploy.yaml to server (normalize LF)
         env:
           HOST: ${{ secrets.IONOS_HOST }}
           USERNAME: ${{ secrets.IONOS_USER }}
@@ -86,18 +85,15 @@ jobs:
         run: |
           set -e
           PORT=${PORT:-22}
-          # Datei aus dem Repo kopieren (statt Heredoc erzeugen)
           scp -o StrictHostKeyChecking=no -P "$PORT" \
             "$CONTEXT/compose.deploy.yaml" \
             "$USERNAME@$HOST:$REMOTE_DIR/compose.deploy.yaml"
 
-          # Zeilenenden auf dem Server normalisieren (CRLF -> LF)
           ssh -o StrictHostKeyChecking=no -p "$PORT" "$USERNAME@$HOST" \
             "sed -i 's/\r$//' '$REMOTE_DIR/compose.deploy.yaml' && \
-             printf '--- Remote compose.deploy.yaml ---\n' && nl -ba '$REMOTE_DIR/compose.deploy.yaml' | sed -n '1,80p'"
+             printf '--- Remote compose.deploy.yaml ---\n' && nl -ba '$REMOTE_DIR/compose.deploy.yaml' | sed -n '1,120p'"
 
       - name: (Optional) Login GHCR on server (for private images)
-        if: ${{ secrets.GHCR_TOKEN != '' && secrets.GHCR_USER != '' }}
         env:
           HOST: ${{ secrets.IONOS_HOST }}
           USERNAME: ${{ secrets.IONOS_USER }}
@@ -107,8 +103,12 @@ jobs:
         run: |
           set -e
           PORT=${PORT:-22}
-          ssh -o StrictHostKeyChecking=no -p "$PORT" "$USERNAME@$HOST" \
-            "echo '${GHCR_TOKEN}' | docker login ghcr.io -u '${GHCR_USER}' --password-stdin || true"
+          if [ -n "${GHCR_USER}" ] && [ -n "${GHCR_TOKEN}" ]; then
+            ssh -o StrictHostKeyChecking=no -p "$PORT" "$USERNAME@$HOST" \
+              "echo '${GHCR_TOKEN}' | docker login ghcr.io -u '${GHCR_USER}' --password-stdin || true"
+          else
+            echo "Skipping GHCR login on server (no GHCR_USER/GHCR_TOKEN provided)."
+          fi
 
       - name: Deploy (pull & recreate)
         env:
