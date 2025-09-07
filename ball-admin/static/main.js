@@ -59,7 +59,7 @@ async function apiCall(endpoint, options = {}) {
   try {
     const response = await fetch(endpoint, {
       headers: {
-        'Content-Type': 'application/json',
+        'Accept': 'application/json',
         ...options.headers
       },
       ...options
@@ -67,6 +67,13 @@ async function apiCall(endpoint, options = {}) {
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('Non-JSON response:', text);
+      throw new Error('Server returned non-JSON response');
     }
     
     return await response.json();
@@ -83,7 +90,7 @@ async function apiCall(endpoint, options = {}) {
 
 async function loadStats() {
   try {
-    statsData = await apiCall('/api/stats');
+    statsData = await apiCall('./api/stats');
     renderStats();
   } catch (error) {
     document.getElementById('statsGrid').innerHTML = 
@@ -142,7 +149,7 @@ function renderStats() {
 
 async function loadLabelerTasks() {
   try {
-    labelerTasks = await apiCall('/api/labeler/tasks');
+    labelerTasks = await apiCall('./api/labeler/tasks');
     renderLabelerTasks();
   } catch (error) {
     document.getElementById('labelerTableBody').innerHTML = 
@@ -189,7 +196,7 @@ function renderLabelerTasks() {
       </td>
       <td>
         <div class="btn-group">
-          <a href="/api/labeler/task/${encodeURIComponent(task.task_id)}/download" 
+          <a href="./api/labeler/task/${encodeURIComponent(task.task_id)}/download" 
              class="btn success" title="Task downloaden">📥</a>
           <button class="btn danger" onclick="deleteLabelerTask('${task.task_id}')" 
                   title="Task löschen">🗑️</button>
@@ -205,7 +212,7 @@ async function deleteLabelerTask(taskId) {
   }
   
   try {
-    await apiCall(`/api/labeler/task/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+    await apiCall(`./api/labeler/task/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
     showStatus(`Task "${taskId}" erfolgreich gelöscht`, 'success');
     await loadLabelerTasks();
     await loadStats(); // Stats aktualisieren
@@ -225,7 +232,7 @@ async function refreshLabelerTasks() {
 
 async function loadAnalyzerAnalyses() {
   try {
-    analyzerAnalyses = await apiCall('/api/analyzer/analyses');
+    analyzerAnalyses = await apiCall('./api/analyzer/analyses');
     renderAnalyzerAnalyses();
   } catch (error) {
     document.getElementById('analyzerTableBody').innerHTML = 
@@ -260,21 +267,21 @@ function renderAnalyzerAnalyses() {
       <td>
         <div class="btn-group">
           ${analysis.has_heatmap 
-            ? `<a href="/api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/heatmap" 
+            ? `<a href="./api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/heatmap" 
                  class="btn success" title="Heatmap">🔥</a>` 
             : ''
           }
           ${analysis.has_preview 
-            ? `<a href="/api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/preview" 
+            ? `<a href="./api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/preview" 
                  class="btn warning" title="Preview Video">🎬</a>` 
             : ''
           }
           ${analysis.has_csv 
-            ? `<a href="/api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/csv" 
+            ? `<a href="./api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/csv" 
                  class="btn success" title="CSV Daten">📊</a>` 
             : ''
           }
-          <a href="/api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download-all" 
+          <a href="./api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download-all" 
              class="btn primary" title="Alles als ZIP">📦</a>
         </div>
       </td>
@@ -292,7 +299,7 @@ async function deleteAnalyzerAnalysis(analysisId) {
   }
   
   try {
-    await apiCall(`/api/analyzer/analysis/${encodeURIComponent(analysisId)}`, { method: 'DELETE' });
+    await apiCall(`./api/analyzer/analysis/${encodeURIComponent(analysisId)}`, { method: 'DELETE' });
     showStatus(`Analyse "${analysisId}" erfolgreich gelöscht`, 'success');
     await loadAnalyzerAnalyses();
     await loadStats(); // Stats aktualisieren
@@ -331,7 +338,7 @@ async function performCleanup() {
   }
   
   try {
-    const result = await apiCall('/api/cleanup/old-tasks', {
+    const result = await apiCall('./api/cleanup/old-tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ days: days })
