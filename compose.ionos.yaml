@@ -14,13 +14,14 @@ services:
 
   # Ball Analyzer (neue App)
   ball-analyzer:
-    image: ghcr.io/b4571r3h/ball-web-analyzer:latest
+    image: ball-web-analyzer:fixed
     container_name: tt-ball-analyzer
     environment:
       - ANALYZER_DATA_DIR=/data/analyzer
       - APP_ROOT_PATH=/ball-analyzer
     volumes:
       - ./ball-web-analyzer/data:/data/analyzer
+      - ./ball-web-analyzer/runs:/runs
     restart: unless-stopped
 
   # Admin Panel
