@@ -25,7 +25,7 @@ jobs:
     - name: Build and push Ball Analyzer
       uses: docker/build-push-action@v5
       with:
-        context: ./ball-web-analyzer
+        context: .
         file: ./ball-web-analyzer/webapp/Dockerfile-fastapi
         push: true
         tags: ghcr.io/${{ github.repository_owner }}/ball-web-analyzer:latest

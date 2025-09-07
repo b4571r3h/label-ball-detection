@@ -9,13 +9,14 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libgomp1 \
     wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Arbeitsverzeichnis
 WORKDIR /app
 
 # Requirements installieren
-COPY requirements-fastapi.txt /app/
+COPY ball-web-analyzer/webapp/requirements-fastapi.txt /app/
 RUN pip install --no-cache-dir -r requirements-fastapi.txt
 
 # PyTorch und Ultralytics für YOLO installieren
@@ -23,11 +24,10 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 RUN pip install --no-cache-dir ultralytics
 
 # App-Code kopieren
-COPY . /app/
+COPY ball-web-analyzer/webapp/ /app/
 
-# Assets-Verzeichnis von parent erstellen und kopieren
-RUN mkdir -p /app/analyzer/assets
-COPY ../assets/ /app/analyzer/assets/
+# Assets kopieren
+COPY ball-web-analyzer/assets/ /app/assets/
 
 # Data-Verzeichnisse erstellen
 RUN mkdir -p /data/analyzer
