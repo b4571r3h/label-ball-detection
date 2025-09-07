@@ -26,7 +26,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: ./ball-web-analyzer
-        file: ./ball-web-analyzer/Dockerfile-server
+        file: ./ball-web-analyzer/webapp/Dockerfile-fastapi
         push: true
         tags: ghcr.io/${{ github.repository_owner }}/ball-web-analyzer:latest
     
