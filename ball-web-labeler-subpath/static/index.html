@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TT Ball Label</title>
+  <title>TT Ball Labeler by B4571</title>
   <script defer src="static/main.js"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
@@ -30,29 +30,26 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>🏓 TT Ball Labeler <span class="muted">(YouTube & Upload)</span></h1>
+    <h1>🏓 TT Ball Labeler von Basti<span class="muted">(YouTube & Upload)</span></h1>
 
     <div class="card" id="ingestCard">
       <div class="row">
         <div class="drop" id="dropZone" style="flex:1; min-width:260px;">
           <div><strong>Drag & Drop</strong> Video hierher oder Datei wählen</div>
-          <input id="file-input" type="file" accept="video/*">
-          <div style="margin-top:8px;" class="muted">Optional FPS: <input id="fps-input" type="number" value="5" min="1" step="1"> | Task-Name: <input id="task-name-input" type="text" placeholder="optional">
+          <input id="file-input-local" type="file" accept="video/*">
+          <div style="margin-top:8px;" class="muted">Optional FPS: <input id="fps-local" type="number" value="5" min="1" step="1"> | Task-Name: <input id="task-local" type="text" placeholder="optional">
           </div>
           <button class="btn" id="btn-upload" type="button">Hochladen & Frames extrahieren</button>
         </div>
         <div style="flex:1; min-width:260px;">
           <div><strong>Oder YouTube-URL</strong></div>
-          <input id="ytUrl" type="url" placeholder="https://www.youtube.com/watch?v=..." style="width:100%; padding:12px; border-radius:8px; border:1px solid #374151; background:#0b1220; color:#e5e7eb;" />
-          <div style="margin-top:8px;" class="muted">FPS: <input id="fpsYT" type="number" value="5" step="0.5" style="width:90px;"> | Task-Name: <input id="nameYT" type="text" placeholder="optional"></div>
-          <button class="btn" id="ytBtn">Ingest YouTube & Frames extrahieren</button>
+          <input id="yt-url" type="url" placeholder="https://www.youtube.com/watch?v=..." style="width:100%; padding:12px; border-radius:8px; border:1px solid #374151; background:#0b1220; color:#e5e7eb;" />
+          <div style="margin-top:8px;" class="muted">FPS: <input id="fps-yt" type="number" value="5" step="0.5" style="width:90px;"> | Task-Name: <input id="task-yt" type="text" placeholder="optional"></div>
+          <button class="btn" id="btn-yt">Ingest YouTube & Frames extrahieren</button>
         </div>
       </div>
-      <div class="muted" id="ingestStatus" style="margin-top:8px;">Bereit.</div>
+      <div class="muted" id="status" style="margin-top:8px;">Bereit.</div>
     </div>
-
-    <base href="/ball-detection/" />
-    <script src="static/main.js"></script>
 
     <div class="card" id="labelCard" style="margin-top:16px; display:none;">
       <div class="row" style="justify-content:space-between;">

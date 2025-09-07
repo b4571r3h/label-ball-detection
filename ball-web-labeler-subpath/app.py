@@ -283,13 +283,13 @@ def api_ingest_youtube(
 
 # -------------------- Frames auflisten/ausliefern --------------------
 
-@core.get("/api/task/{task_id}/frames")
+@core.get("/api/task/{task_id:path}/frames")
 def api_task_frames(task_id: str):
     frames = list_frames(task_id)
     return {"task_id": task_id, "frames": frames}
 
 
-@core.get("/api/task/{task_id}/frame/{filename}")
+@core.get("/api/task/{task_id:path}/frame/{filename}")
 def api_task_frame_image(task_id: str, filename: str):
     td = task_dir(task_id)
     img = (td / "frames" / filename).resolve()
@@ -301,7 +301,7 @@ def api_task_frame_image(task_id: str, filename: str):
 
 # -------------------- Label speichern (YOLO-Format) --------------------
 
-@core.post("/api/task/{task_id}/label")
+@core.post("/api/task/{task_id:path}/label")
 def api_task_save_label(task_id: str, li: LabelIn):
     td = task_dir(task_id)
     img = (td / "frames" / li.filename).resolve()
@@ -334,7 +334,7 @@ def api_task_save_label(task_id: str, li: LabelIn):
 
 # -------------------- Export ZIP (YOLO-Struktur) --------------------
 
-@core.get("/api/task/{task_id}/export")
+@core.get("/api/task/{task_id:path}/export")
 def api_task_export(task_id: str):
     td = task_dir(task_id)
     frames = sorted((td / "frames").glob("*.jpg"))
