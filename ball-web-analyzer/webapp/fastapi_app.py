@@ -16,9 +16,9 @@ from typing import Optional, List
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -379,16 +379,78 @@ def get_bounces_csv(analysis_id: str):
     
     return FileResponse(str(csv_path), media_type="text/csv", filename="bounces.csv")
 
+def range_requests_response(
+    file_path: Path,
+    request: Request,
+    content_type: str = "video/mp4"
+):
+    """Unterstützt HTTP Range Requests für Video-Streaming"""
+    file_size = file_path.stat().st_size
+    
+    range_header = request.headers.get("range")
+    if range_header:
+        # Parse Range header: "bytes=start-end"
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0]) if range_match[0] else 0
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        
+        # Begrenzen auf Dateigröße
+        start = max(0, start)
+        end = min(end, file_size - 1)
+        content_length = end - start + 1
+        
+        def iter_file():
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk_size = min(8192, remaining)
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+        
+        headers = {
+            "content-range": f"bytes {start}-{end}/{file_size}",
+            "accept-ranges": "bytes",
+            "content-length": str(content_length),
+        }
+        
+        return StreamingResponse(
+            iter_file(),
+            status_code=206,
+            headers=headers,
+            media_type=content_type
+        )
+    else:
+        # Kein Range-Request - ganzes File senden
+        def iter_file():
+            with open(file_path, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+        
+        headers = {
+            "content-length": str(file_size),
+            "accept-ranges": "bytes"
+        }
+        
+        return StreamingResponse(
+            iter_file(),
+            headers=headers,
+            media_type=content_type
+        )
+
 @core.get("/api/analysis/{analysis_id:path}/preview")
-def get_preview(analysis_id: str):
-    """Preview-Video herunterladen"""
+def get_preview(analysis_id: str, request: Request):
+    """Preview-Video mit Range-Request Support streamen"""
     ad = analysis_dir(analysis_id)
     preview_path = ad / "preview.mp4"
     
     if not preview_path.exists():
         raise HTTPException(404, "Preview nicht gefunden")
     
-    return FileResponse(str(preview_path), media_type="video/mp4")
+    return range_requests_response(preview_path, request)
 
 @core.get("/api/analyses")
 def list_analyses():
