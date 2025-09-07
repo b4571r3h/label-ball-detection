@@ -14,8 +14,8 @@ app.basti-reh.de {
         reverse_proxy tt-ball-labeler:8000
     }
     
-    # Ball Analyzer  
-    handle /ball-analyzer/* {
+    # Ball Analyzer (with root-path configured)
+    handle_path /ball-analyzer/* {
         reverse_proxy tt-ball-analyzer:8001
     }
     
