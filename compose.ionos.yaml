@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Ball Detection Labeler (bestehende App)
+  ball-labeler:
+    image: ghcr.io/b4571r3h/label-ball-detection:latest
+    container_name: tt-ball-labeler
+    environment:
+      - LABEL_DATA_DIR=/data/labels
+      - APP_ROOT_PATH=/ball-detection
+    volumes:
+      - ./ball-web-labeler-subpath/data:/data/labels
+    restart: unless-stopped
+
+  # Ball Analyzer (neue App)
+  ball-analyzer:
+    image: ghcr.io/b4571r3h/ball-web-analyzer:latest
+    container_name: tt-ball-analyzer
+    environment:
+      - ANALYZER_DATA_DIR=/data/analyzer
+      - APP_ROOT_PATH=/ball-analyzer
+    volumes:
+      - ./ball-web-analyzer/data:/data/analyzer
+    restart: unless-stopped
+
+  # Reverse Proxy (kombiniert beide Apps)
+  caddy:
+    image: caddy:2-alpine
+    container_name: tt-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile-dual:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    depends_on:
+      - ball-labeler
+      - ball-analyzer
+
+volumes:
+  caddy_data:
+  caddy_config:
