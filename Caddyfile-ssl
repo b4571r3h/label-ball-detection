@@ -23,9 +23,7 @@ app.basti-reh.de {
     redir /admin/admin/* /admin/ 302
     
     # Admin Panel - Explicit route for root
-    handle /admin {
-        redir /admin/
-    }
+    redir /admin /admin/ 302
     
     # Admin Panel
     handle_path /admin/* {
