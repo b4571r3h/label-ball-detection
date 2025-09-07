@@ -7,25 +7,35 @@
     const loc = window.location;
     let p = loc.pathname || "/";
     
+    console.log("Current pathname:", p);
+    
     // Wenn wir uns in einem Subpath befinden, extrahiere den ersten Pfad-Teil
-    // z.B. "/ball-detection/static/index.html" -> "/ball-detection"
+    // z.B. "/ball-detection/" -> "/ball-detection"
+    // z.B. "/ball-detection/static/index.html" -> "/ball-detection"  
     const segments = p.split('/').filter(s => s.length > 0);
+    
+    console.log("Path segments:", segments);
     
     // Wenn der erste Segment "ball-detection" ist, verwende das
     if (segments.length > 0 && segments[0] === 'ball-detection') {
       return '/ball-detection';
     }
     
-    // Fallback: Root
+    // Fallback: Prüfe ob wir direkt unter /ball-detection/ sind
+    if (p.startsWith('/ball-detection')) {
+      return '/ball-detection';
+    }
+    
+    // Lokale Entwicklung: kein Subpath
     return '';
   }
   
-  // const ROOT = detectRoot(); 
-  // console.log("Detected ROOT:", ROOT, "from pathname:", window.location.pathname);
+  const ROOT = detectRoot(); 
+  console.log("Detected ROOT:", ROOT, "from pathname:", window.location.pathname);
   
-  // TEMPORÄRER FIX: Für lokale Entwicklung ohne Docker (python app.py direkt)
-  const ROOT = ""; // Leerer Pfad für direkten Server-Start
-  console.log("Using ROOT:", ROOT);
+  // TEMPORÄRER FIX: Falls Auto-Detection nicht funktioniert
+  // const ROOT = ""; // Für lokale Entwicklung
+  // const ROOT = "/ball-detection"; // Für Docker-Deployment
   
   const API = (path) => {
     const cleanPath = path.startsWith("/") ? path : "/" + path;
