@@ -22,6 +22,7 @@ services:
     volumes:
       - ./ball-web-analyzer/data:/data/analyzer
       - ./ball-web-analyzer/runs:/runs
+      - ./ball-web-analyzer/infer_bounce_heatmap.py:/infer_bounce_heatmap.py
     restart: unless-stopped
 
   # Admin Panel
