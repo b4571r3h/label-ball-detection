@@ -17,4 +17,4 @@ RUN mkdir -p /data/labels /data/analyzer
 
 EXPOSE 8002
 
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port 8002 --root-path \"$APP_ROOT_PATH\""]
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port 8002 ${APP_ROOT_PATH:+--root-path \"$APP_ROOT_PATH\"}"]

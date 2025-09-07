@@ -407,19 +407,11 @@ def api_cleanup_old_tasks(days: int = 30):
     return {"deleted_count": deleted_count, "cutoff_days": days}
 
 # ---------------------------------------------------------------------
-# Wrapper App für Subpfad
+# FastAPI App Configuration
 # ---------------------------------------------------------------------
 
-if APP_ROOT_PATH:
-    app = FastAPI()
-    app.mount(APP_ROOT_PATH, core)
-    
-    @app.get("/", include_in_schema=False)
-    def _root_redirect():
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=f"{APP_ROOT_PATH}/")
-else:
-    app = core
+# Für Subpfad-Deployment verwenden wir root_path direkt in der core App
+app = core
 
 # ---------------------------------------------------------------------
 # Dev Server
