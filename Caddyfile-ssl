@@ -19,6 +19,9 @@ app.basti-reh.de {
         reverse_proxy tt-ball-analyzer:8001
     }
     
+    # Admin Panel - Redirect old double path
+    redir /admin/admin/* /admin/{path}
+    
     # Admin Panel
     handle_path /admin/* {
         reverse_proxy tt-ball-admin:8002
