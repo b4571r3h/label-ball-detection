@@ -154,3 +154,4 @@ web/
 - Bounce-Heatmaps (.png)
 - Analyse-Videos (.mp4)
 - Bounce-Daten (.csv)
+# SSH Key Fix Test Sun Sep  7 15:18:57 UTC 2025
