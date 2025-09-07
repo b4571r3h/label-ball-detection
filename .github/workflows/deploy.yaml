@@ -85,13 +85,17 @@ jobs:
         run: |
           set -e
           PORT=${PORT:-22}
+          # Datei hochladen
           scp -o StrictHostKeyChecking=no -P "$PORT" \
             "$CONTEXT/compose.deploy.yaml" \
             "$USERNAME@$HOST:$REMOTE_DIR/compose.deploy.yaml"
 
+          # Zeilenenden normalisieren und die ersten Zeilen anzeigen
           ssh -o StrictHostKeyChecking=no -p "$PORT" "$USERNAME@$HOST" \
             "sed -i 's/\r$//' '$REMOTE_DIR/compose.deploy.yaml' && \
-             printf '--- Remote compose.deploy.yaml ---\n' && nl -ba '$REMOTE_DIR/compose.deploy.yaml' | sed -n '1,120p'"
+             echo '--- Remote compose.deploy.yaml ---' && \
+             nl -ba '$REMOTE_DIR/compose.deploy.yaml' | sed -n '1,120p'"
+
 
       - name: (Optional) Login GHCR on server (for private images)
         env:
