@@ -20,7 +20,7 @@ app.basti-reh.de {
     }
     
     # Admin Panel - Redirect old double path
-    redir /admin/admin/* /admin/{path}
+    redir /admin/admin/* /admin/ 302
     
     # Admin Panel
     handle_path /admin/* {
