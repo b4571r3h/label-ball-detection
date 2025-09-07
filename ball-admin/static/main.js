@@ -328,7 +328,7 @@ function watchVideo(analysisId) {
       </div>
       <div class="modal-body">
         <video controls style="width: 100%; max-height: 70vh;">
-          <source src="./api/analyzer/analysis/${encodeURIComponent(analysisId)}/watch" type="video/mp4">
+          <source src="./api/analyzer/analysis/${encodeURIComponent(analysisId)}/download/preview" type="video/mp4">
           Ihr Browser unterstützt kein HTML5-Video.
         </video>
       </div>
