@@ -94,15 +94,15 @@ echo -e "${YELLOW}10. Performing health check...${NC}"
 sleep 15
 
 # Ball Labeler Check
-if curl -s -f http://${SERVER_HOST}/ball-detection/api/health > /dev/null; then
-    echo -e "${GREEN}✅ Ball Labeler: http://${SERVER_HOST}/ball-detection/${NC}"
+if curl -s -f https://app.basti-reh.de/ball-detection/api/health > /dev/null; then
+    echo -e "${GREEN}✅ Ball Labeler: https://app.basti-reh.de/ball-detection/${NC}"
 else
     echo -e "${RED}❌ Ball Labeler health check failed${NC}"
 fi
 
-# Ball Analyzer Check
-if curl -s -f http://${SERVER_HOST}/ball-analyzer/api/health > /dev/null; then
-    echo -e "${GREEN}✅ Ball Analyzer: http://${SERVER_HOST}/ball-analyzer/${NC}"
+# Ball Analyzer Check  
+if curl -s -f https://app.basti-reh.de/ball-analyzer/ > /dev/null; then
+    echo -e "${GREEN}✅ Ball Analyzer: https://app.basti-reh.de/ball-analyzer/${NC}"
 else
     echo -e "${RED}❌ Ball Analyzer health check failed${NC}"
 fi
@@ -110,8 +110,8 @@ fi
 echo ""
 echo -e "${GREEN}🎉 Deployment completed!${NC}"
 echo -e "${BLUE}📱 Access your apps:${NC}"
-echo -e "  🏓 Ball Labeler:  http://${SERVER_HOST}/ball-detection/"
-echo -e "  📊 Ball Analyzer: http://${SERVER_HOST}/ball-analyzer/"
+echo -e "  🏓 Ball Labeler:  https://app.basti-reh.de/ball-detection/"
+echo -e "  📊 Ball Analyzer: https://app.basti-reh.de/ball-analyzer/"
 echo ""
 echo -e "${YELLOW}💡 Useful commands for server management:${NC}"
 echo -e "  ssh ${SERVER_USER}@${SERVER_HOST}"

@@ -1,0 +1,30 @@
+# Selbstsigniertes SSL-Zertifikat für IP-Adresse
+{
+    auto_https off
+}
+
+# HTTPS mit selbstsigniertem Zertifikat
+https://87.106.82.60:443 {
+    tls internal  # Selbstsigniertes Zertifikat
+    
+    # Root-Redirect zu Ball Detection
+    redir / /ball-detection/ 302
+    
+    # Ball Detection Labeler
+    handle /ball-detection/* {
+        reverse_proxy tt-ball-labeler:8000
+    }
+    
+    # Ball Analyzer
+    handle /ball-analyzer/* {
+        reverse_proxy tt-ball-analyzer:8001
+    }
+    
+    # Fallback
+    respond "🏓 TT Ball Detection & Analysis Platform (Self-Signed HTTPS)" 200
+}
+
+# HTTP Fallback (optional)
+http://87.106.82.60:80 {
+    redir https://87.106.82.60{uri} 301
+}

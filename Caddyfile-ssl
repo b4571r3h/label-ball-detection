@@ -1,0 +1,27 @@
+# SSL-aktivierte Caddy-Konfiguration für beide Apps
+{
+    # Automatische HTTPS aktiviert (Let's Encrypt)
+    email basti@basti-reh.de
+}
+
+# Hauptdomain mit HTTPS
+app.basti-reh.de {
+    # Root-Redirect zu Ball Detection
+    redir / /ball-detection/ 302
+    
+    # Ball Detection Labeler
+    handle /ball-detection/* {
+        reverse_proxy tt-ball-labeler:8000
+    }
+    
+    # Ball Analyzer
+    handle /ball-analyzer/* {
+        reverse_proxy tt-ball-analyzer:8001
+    }
+    
+    # Fallback
+    respond "🏓 TT Ball Detection & Analysis Platform (HTTPS)" 200
+}
+
+# HTTP zu HTTPS Redirect (automatisch von Caddy)
+# Caddy leitet automatisch HTTP-Traffic zu HTTPS um
