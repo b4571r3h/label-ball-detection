@@ -9,13 +9,13 @@
     redir / /ball-detection/ 302
     
     # Ball Detection Labeler (bestehende App)
-    handle_path /ball-detection/* {
-        reverse_proxy ball-labeler:8000
+    handle /ball-detection/* {
+        reverse_proxy tt-ball-labeler:8000
     }
     
     # Ball Analyzer (neue App)  
-    handle_path /ball-analyzer/* {
-        reverse_proxy ball-analyzer:8001
+    handle /ball-analyzer/* {
+        reverse_proxy tt-ball-analyzer:8001
     }
     
     # Fallback

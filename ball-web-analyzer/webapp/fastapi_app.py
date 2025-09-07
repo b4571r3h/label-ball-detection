@@ -430,3 +430,7 @@ else:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("fastapi_app:app", host="0.0.0.0", port=8001, reload=True)
+
+@core.get("/api/health")
+def health_check():
+    return {"status": "healthy", "service": "ball-analyzer"}
