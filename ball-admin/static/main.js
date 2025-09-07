@@ -272,8 +272,10 @@ function renderAnalyzerAnalyses() {
             : ''
           }
           ${analysis.has_preview 
-            ? `<a href="./api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/preview" 
-                 class="btn warning" title="Preview Video">🎬</a>` 
+            ? `<button class="btn info" onclick="watchVideo('${analysis.analysis_id}')" 
+                 title="Video ansehen">👁️</button>
+               <a href="./api/analyzer/analysis/${encodeURIComponent(analysis.analysis_id)}/download/preview" 
+                 class="btn warning" title="Preview Video downloaden">📥</a>` 
             : ''
           }
           ${analysis.has_csv 
@@ -311,6 +313,41 @@ async function deleteAnalyzerAnalysis(analysisId) {
 async function refreshAnalyzerAnalyses() {
   showStatus('Aktualisiere Analysen...', 'info', 1000);
   await loadAnalyzerAnalyses();
+}
+
+function watchVideo(analysisId) {
+  // Video-Modal erstellen und anzeigen
+  const modal = document.createElement('div');
+  modal.className = 'modal active';
+  modal.innerHTML = `
+    <div class="modal-overlay" onclick="closeVideoModal()"></div>
+    <div class="modal-content video-modal">
+      <div class="modal-header">
+        <h3>🎬 Video Preview: ${analysisId}</h3>
+        <button class="close-btn" onclick="closeVideoModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <video controls style="width: 100%; max-height: 70vh;">
+          <source src="./api/analyzer/analysis/${encodeURIComponent(analysisId)}/watch" type="video/mp4">
+          Ihr Browser unterstützt kein HTML5-Video.
+        </video>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" onclick="closeVideoModal()">Schließen</button>
+        <a href="./api/analyzer/analysis/${encodeURIComponent(analysisId)}/download/preview" 
+           class="btn primary" download>Video herunterladen</a>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+}
+
+function closeVideoModal() {
+  const modal = document.querySelector('.modal.active');
+  if (modal) {
+    modal.remove();
+  }
 }
 
 // =============================================================================

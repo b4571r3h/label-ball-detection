@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import List, Dict, Any
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Response, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -72,6 +72,68 @@ class AnalysisInfo(BaseModel):
 # ---------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------
+
+def range_requests_response(
+    file_path: Path,
+    request: Request,
+    content_type: str = "video/mp4"
+):
+    """Unterstützt HTTP Range Requests für Video-Streaming"""
+    file_size = file_path.stat().st_size
+    
+    range_header = request.headers.get("range")
+    if range_header:
+        # Parse Range header: "bytes=start-end"
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0]) if range_match[0] else 0
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        
+        # Begrenzen auf Dateigröße
+        start = max(0, start)
+        end = min(end, file_size - 1)
+        content_length = end - start + 1
+        
+        def iter_file():
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk_size = min(8192, remaining)
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+        
+        headers = {
+            "content-range": f"bytes {start}-{end}/{file_size}",
+            "accept-ranges": "bytes",
+            "content-length": str(content_length),
+        }
+        
+        return StreamingResponse(
+            iter_file(),
+            status_code=206,
+            headers=headers,
+            media_type=content_type
+        )
+    else:
+        # Kein Range-Request - ganzes File senden
+        def iter_file():
+            with open(file_path, "rb") as f:
+                while chunk := f.read(8192):
+                    yield chunk
+        
+        headers = {
+            "content-length": str(file_size),
+            "accept-ranges": "bytes"
+        }
+        
+        return StreamingResponse(
+            iter_file(),
+            headers=headers,
+            media_type=content_type
+        )
 
 def get_dir_size(path: Path) -> float:
     """Berechnet Verzeichnisgröße in MB."""
@@ -309,7 +371,7 @@ def api_delete_analyzer_analysis(analysis_id: str):
         raise HTTPException(500, "Fehler beim Löschen")
 
 @core.get("/api/analyzer/analysis/{analysis_id:path}/download/{file_type}")
-def api_download_analyzer_file(analysis_id: str, file_type: str):
+def api_download_analyzer_file(analysis_id: str, file_type: str, request: Request):
     """Einzelne Analyzer-Datei downloaden."""
     analysis_path = ANALYZER_DATA_DIR / analysis_id
     
@@ -340,11 +402,31 @@ def api_download_analyzer_file(analysis_id: str, file_type: str):
         if not file_path.exists():
             raise HTTPException(404, f"{file_type} nicht gefunden")
     
-    return FileResponse(
-        path=str(file_path),
-        filename=file_path.name,
-        media_type=media_type
-    )
+    # Für Videos verwenden wir Streaming mit Range-Request Support
+    if media_type == "video/mp4":
+        return range_requests_response(file_path, request, media_type)
+    else:
+        return FileResponse(
+            path=str(file_path),
+            filename=file_path.name,
+            media_type=media_type
+        )
+
+@core.get("/api/analyzer/analysis/{analysis_id:path}/watch")
+def api_watch_analyzer_video(analysis_id: str, request: Request):
+    """Analyzer-Video für Browser-Wiedergabe bereitstellen."""
+    analysis_path = ANALYZER_DATA_DIR / analysis_id
+    
+    if not analysis_path.exists():
+        raise HTTPException(404, "Analyse nicht gefunden")
+    
+    # Preview-Video finden
+    preview_files = list(analysis_path.glob("preview.*"))
+    if not preview_files:
+        raise HTTPException(404, "Preview-Video nicht gefunden")
+    
+    file_path = preview_files[0]
+    return range_requests_response(file_path, request, "video/mp4")
 
 @core.get("/api/analyzer/analysis/{analysis_id:path}/download-all")
 def api_download_analyzer_all(analysis_id: str):
