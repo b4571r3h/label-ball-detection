@@ -1,0 +1,23 @@
+# Kombinierte Caddy-Konfiguration für beide Apps
+{
+    auto_https off
+}
+
+# Hauptdomain mit beiden Subpaths
+:80 {
+    # Root-Redirect zu Übersicht
+    redir / /ball-detection/ 302
+    
+    # Ball Detection Labeler (bestehende App)
+    handle_path /ball-detection/* {
+        reverse_proxy ball-labeler:8000
+    }
+    
+    # Ball Analyzer (neue App)  
+    handle_path /ball-analyzer/* {
+        reverse_proxy ball-analyzer:8001
+    }
+    
+    # Fallback
+    respond "TT Ball Detection & Analysis Platform" 200
+}

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="400" height="600" viewBox="0 0 400 600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tisch-Hintergrund -->
+  <rect width="400" height="600" fill="#2563eb" stroke="#1e40af" stroke-width="4"/>
+  
+  <!-- Netz (horizontal in der Mitte) -->
+  <line x1="0" y1="300" x2="400" y2="300" stroke="#ffffff" stroke-width="3" opacity="0.8"/>
+  
+  <!-- Seitenlinien -->
+  <line x1="10" y1="10" x2="10" y2="590" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+  <line x1="390" y1="10" x2="390" y2="590" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+  
+  <!-- Endlinien -->
+  <line x1="10" y1="10" x2="390" y2="10" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+  <line x1="10" y1="590" x2="390" y2="590" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+  
+  <!-- Mittellinie -->
+  <line x1="200" y1="0" x2="200" y2="600" stroke="#ffffff" stroke-width="1" opacity="0.4"/>
+</svg>

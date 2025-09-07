@@ -1,0 +1,43 @@
+FROM python:3.11-slim
+
+# System-Dependencies installieren
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Arbeitsverzeichnis
+WORKDIR /app
+
+# Requirements installieren
+COPY requirements-fastapi.txt /app/
+RUN pip install --no-cache-dir -r requirements-fastapi.txt
+
+# PyTorch und Ultralytics für YOLO installieren
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir ultralytics
+
+# App-Code kopieren
+COPY . /app/
+
+# Assets-Verzeichnis von parent erstellen und kopieren
+RUN mkdir -p /app/analyzer/assets
+COPY ../assets/ /app/analyzer/assets/
+
+# Data-Verzeichnisse erstellen
+RUN mkdir -p /data/analyzer
+
+# Port freigeben
+EXPOSE 8001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8001/api/health || exit 1
+
+# Start-Command
+CMD ["python", "fastapi_app.py"]

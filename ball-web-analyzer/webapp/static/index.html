@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ball Web Analyzer by B4571</title>
+  <script defer src="static/main.js"></script>
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; --success:#10b981; --warning:#f59e0b; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
+    .wrap { max-width:1200px; margin:24px auto; padding:0 16px; }
+    .card { background:var(--card); border:1px solid #1f2937; border-radius:14px; padding:16px; margin-bottom:16px; }
+    .row { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+    .col { flex:1; min-width:300px; }
+    .btn { background:#1f2937; border:1px solid #374151; padding:14px 18px; border-radius:12px; color:#e5e7eb; cursor:pointer; font-size:16px; text-decoration:none; display:inline-block; text-align:center; }
+    .btn:hover { background:#111827; }
+    .btn.primary { background:var(--accent); border-color:var(--accent); color:#000; }
+    .btn.success { background:var(--success); border-color:var(--success); color:#000; }
+    .btn.warning { background:var(--warning); border-color:var(--warning); color:#000; }
+    .btn:disabled { opacity:0.5; cursor:not-allowed; }
+    .drop { border:2px dashed #374151; border-radius:12px; padding:18px; text-align:center; }
+    .input { background:#0b1220; border:1px solid #374151; padding:12px; border-radius:8px; color:#e5e7eb; width:100%; box-sizing:border-box; }
+    .muted { color: var(--muted); font-size:14px; }
+    .success { color: var(--success); }
+    .warning { color: var(--warning); }
+    .error { color: #ef4444; }
+    
+    /* Kalibrierung */
+    #calibrationArea { position:relative; display:inline-block; max-width:100%; }
+    #calibrationImg { max-width:100%; border-radius:10px; cursor:crosshair; }
+    .calibPoint { 
+      position:absolute; 
+      width:20px; 
+      height:20px; 
+      background:var(--accent); 
+      border:2px solid white; 
+      border-radius:50%; 
+      transform:translate(-50%, -50%); 
+      z-index:10;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .calibPoint.active { background:var(--warning); animation:pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity:1; } 50% { opacity:0.5; } }
+    
+    /* Ergebnisse */
+    .result-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; }
+    .result-item { background:#0b1220; border:1px solid #374151; border-radius:8px; padding:16px; }
+    
+    /* Loading Screen */
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(15, 23, 42, 0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      backdrop-filter: blur(5px);
+    }
+    
+    .loading-content {
+      text-align: center;
+      background: var(--card);
+      padding: 40px;
+      border-radius: 20px;
+      border: 1px solid #1f2937;
+      max-width: 400px;
+      width: 90%;
+    }
+    
+    .loading-spinner {
+      width: 60px;
+      height: 60px;
+      border: 4px solid #374151;
+      border-top: 4px solid var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: #374151;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 20px 0;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--success));
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    
+    .progress-text {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 10px;
+    }
+    
+    .loading-steps {
+      text-align: left;
+      margin-top: 20px;
+    }
+    
+    .loading-step {
+      display: flex;
+      align-items: center;
+      margin: 8px 0;
+      font-size: 14px;
+    }
+    
+    .step-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      margin-right: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+    }
+    
+    .step-pending { background: #374151; color: #9ca3af; }
+    .step-active { background: var(--warning); color: #000; animation: pulse 1.5s infinite; }
+    .step-completed { background: var(--success); color: #000; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .row { flex-direction:column; }
+      .col { min-width:auto; }
+      .btn { width:100%; }
+      .loading-content { padding: 30px 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🏓 Ball Web Analyzer <span class="muted">by Basti</span></h1>
+    <p class="muted">Analysiert TT-Videos mit trainiertem YOLO-Modell und erstellt Bounce-Heatmaps</p>
+
+    <!-- Upload/YouTube -->
+    <div class="card" id="uploadCard">
+      <h2>1. Video laden</h2>
+      <div class="row">
+        <div class="col">
+          <div class="drop" id="dropZone">
+            <div><strong>Drag & Drop</strong> Video hierher oder Datei wählen</div>
+            <input id="file-input" type="file" accept="video/*">
+            <div class="muted" style="margin-top:8px;">Unterstützt: MP4, MOV, AVI, M4V</div>
+          </div>
+          <button class="btn primary" id="btn-upload" type="button">Video hochladen</button>
+        </div>
+        <div class="col">
+          <div><strong>Oder YouTube-URL</strong></div>
+          <input id="ytUrl" type="url" placeholder="https://www.youtube.com/watch?v=..." class="input" />
+          <div class="muted" style="margin-top:8px;">Automatisch auf 2 Minuten begrenzt</div>
+          <button class="btn primary" id="ytBtn">YouTube-Video laden</button>
+        </div>
+      </div>
+      <div class="muted" id="uploadStatus" style="margin-top:16px;">Bereit für Video-Upload...</div>
+    </div>
+
+    <!-- Kalibrierung -->
+    <div class="card" id="calibrationCard" style="display:none;">
+      <h2>2. Tisch-Kalibrierung</h2>
+      <p class="muted">Klicke die 4 Ecken des Tischtennistisches in dieser Reihenfolge: <strong>Oben-Links → Oben-Rechts → Unten-Rechts → Unten-Links</strong></p>
+      
+      <div id="calibrationArea">
+        <img id="calibrationImg" src="" alt="Kalibrierungs-Frame" />
+        <!-- Kalibrierpunkte werden hier dynamisch hinzugefügt -->
+      </div>
+      
+      <div style="margin-top:16px;">
+        <div class="row">
+          <div class="col">
+            <div id="calibrationStatus" class="muted">Klicke Punkt 1: Oben-Links</div>
+          </div>
+          <div>
+            <button class="btn" id="resetCalibBtn">Punkte zurücksetzen</button>
+            <button class="btn success" id="saveCalibBtn" disabled>Kalibrierung speichern</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analyse -->
+    <div class="card" id="analysisCard" style="display:none;">
+      <h2>3. Video-Analyse</h2>
+      <div class="row">
+        <div class="col">
+          <label>Konfidenz-Schwellwert:</label>
+          <input type="range" id="confidenceSlider" min="0.1" max="0.9" step="0.05" value="0.25" class="input" style="margin-top:8px;">
+          <div class="muted">Aktuell: <span id="confidenceValue">0.25</span></div>
+        </div>
+        <div>
+          <button class="btn primary" id="analyzeBtn">🚀 Analyse starten</button>
+        </div>
+      </div>
+      <div id="analysisStatus" class="muted" style="margin-top:16px;">Bereit für Analyse...</div>
+    </div>
+
+    <!-- Ergebnisse -->
+    <div class="card" id="resultsCard" style="display:none;">
+      <h2>4. Ergebnisse</h2>
+      <div class="result-grid">
+        <div class="result-item" id="heatmapResult" style="display:none;">
+          <h3>🔥 Bounce-Heatmap</h3>
+          <img id="heatmapImg" src="" alt="Heatmap" style="max-width:100%; border-radius:8px;">
+          <div style="margin-top:8px;">
+            <a class="btn" id="downloadHeatmap" href="#" download="heatmap.png">Heatmap herunterladen</a>
+          </div>
+        </div>
+        
+        <div class="result-item" id="previewResult" style="display:none;">
+          <h3>🎬 Analyse-Preview</h3>
+          <video id="previewVideo" controls style="max-width:100%; border-radius:8px;">
+            Dein Browser unterstützt keine Video-Wiedergabe.
+          </video>
+        </div>
+        
+        <div class="result-item" id="csvResult" style="display:none;">
+          <h3>📊 Bounce-Daten</h3>
+          <div id="csvPreview" class="muted" style="margin-bottom:8px;"></div>
+          <a class="btn" id="downloadCsv" href="#" download="bounces.csv">CSV herunterladen</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Frühere Analysen -->
+    <div class="card" id="historyCard">
+      <h2>📋 Frühere Analysen</h2>
+      <div id="analysesList" class="muted">Lade Analysen...</div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+    <div class="loading-content">
+      <div class="loading-spinner"></div>
+      <h3 id="loadingTitle">🏓 Analysiere Video...</h3>
+      
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-text" id="progressText">0%</div>
+      
+      <div class="loading-steps">
+        <div class="loading-step">
+          <div class="step-icon step-pending" id="step1">1</div>
+          <span>YOLO-Modell laden</span>
+        </div>
+        <div class="loading-step">
+          <div class="step-icon step-pending" id="step2">2</div>
+          <span>Ball-Detektion durchführen</span>
+        </div>
+        <div class="loading-step">
+          <div class="step-icon step-pending" id="step3">3</div>
+          <span>Bounce-Analyse berechnen</span>
+        </div>
+        <div class="loading-step">
+          <div class="step-icon step-pending" id="step4">4</div>
+          <span>Heatmap generieren</span>
+        </div>
+        <div class="loading-step">
+          <div class="step-icon step-pending" id="step5">5</div>
+          <span>Preview-Video erstellen</span>
+        </div>
+      </div>
+      
+      <div style="margin-top: 20px;">
+        <div class="muted" style="font-size: 12px;">
+          ⏱️ Dies kann 1-3 Minuten dauern je nach Video-Länge
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
