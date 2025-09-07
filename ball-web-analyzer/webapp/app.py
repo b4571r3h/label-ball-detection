@@ -11,7 +11,7 @@ INFER_SCRIPT = Path(__file__).resolve().parents[1] / "infer_bounce_heatmap.py"
 
 st.set_page_config(page_title="Ball Analyzer", page_icon="🏓", layout="wide")
 
-st.title("🏓 Ball Web Analyzer")
+st.title("🏓 Ball Web Analyzer TTAI")
 st.caption("Video hochladen oder YouTube-Link einfügen, Tisch kalibrieren, dann Ball-Detektion & Bounce-Heatmap generieren.")
 
 # ---- Eingaben ----
