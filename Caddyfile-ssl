@@ -19,6 +19,11 @@ app.basti-reh.de {
         reverse_proxy tt-ball-analyzer:8001
     }
     
+    # Admin Panel
+    handle /admin/* {
+        reverse_proxy tt-ball-admin:8002
+    }
+    
     # Fallback
     respond "🏓 TT Ball Detection & Analysis Platform (HTTPS)" 200
 }

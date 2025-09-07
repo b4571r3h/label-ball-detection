@@ -61,6 +61,7 @@ ssh ${SERVER_USER}@${SERVER_HOST} << EOF
     cd ${SERVER_PATH}
     docker pull ghcr.io/b4571r3h/label-ball-detection:latest
     docker pull ghcr.io/b4571r3h/ball-web-analyzer:latest
+    docker pull ghcr.io/b4571r3h/ball-admin:latest
     echo -e "${GREEN}✅ Docker images updated${NC}"
 EOF
 
@@ -107,11 +108,19 @@ else
     echo -e "${RED}❌ Ball Analyzer health check failed${NC}"
 fi
 
+# Admin Panel Check
+if curl -s -f https://app.basti-reh.de/admin/api/health > /dev/null; then
+    echo -e "${GREEN}✅ Admin Panel: https://app.basti-reh.de/admin/${NC}"
+else
+    echo -e "${RED}❌ Admin Panel health check failed${NC}"
+fi
+
 echo ""
 echo -e "${GREEN}🎉 Deployment completed!${NC}"
 echo -e "${BLUE}📱 Access your apps:${NC}"
 echo -e "  🏓 Ball Labeler:  https://app.basti-reh.de/ball-detection/"
 echo -e "  📊 Ball Analyzer: https://app.basti-reh.de/ball-analyzer/"
+echo -e "  🛠️ Admin Panel:   https://app.basti-reh.de/admin/"
 echo ""
 echo -e "${YELLOW}💡 Useful commands for server management:${NC}"
 echo -e "  ssh ${SERVER_USER}@${SERVER_HOST}"

@@ -30,6 +30,14 @@ jobs:
         push: true
         tags: ghcr.io/${{ github.repository_owner }}/ball-web-analyzer:latest
     
+    - name: Build and push Ball Admin
+      uses: docker/build-push-action@v5
+      with:
+        context: ./ball-admin
+        file: ./ball-admin/Dockerfile
+        push: true
+        tags: ghcr.io/${{ github.repository_owner }}/ball-admin:latest
+    
     - name: Deploy to IONOS Server
       uses: appleboy/ssh-action@v1.0.0
       with:

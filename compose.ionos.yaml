@@ -23,6 +23,19 @@ services:
       - ./ball-web-analyzer/data:/data/analyzer
     restart: unless-stopped
 
+  # Admin Panel
+  ball-admin:
+    image: ghcr.io/b4571r3h/ball-admin:latest
+    container_name: tt-ball-admin
+    environment:
+      - LABEL_DATA_DIR=/data/labels
+      - ANALYZER_DATA_DIR=/data/analyzer
+      - APP_ROOT_PATH=/admin
+    volumes:
+      - ./ball-web-labeler-subpath/data:/data/labels
+      - ./ball-web-analyzer/data:/data/analyzer
+    restart: unless-stopped
+
   # Reverse Proxy (kombiniert beide Apps)
   caddy:
     image: caddy:2-alpine
@@ -38,6 +51,7 @@ services:
     depends_on:
       - ball-labeler
       - ball-analyzer
+      - ball-admin
 
 volumes:
   caddy_data:
