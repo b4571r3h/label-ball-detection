@@ -19,3 +19,4 @@ build/
 
 # Docker
 *.log
+ball-web-analyzer/preview_bounces.mp4
