@@ -1,0 +1,4 @@
+path: data/ball_det
+train: images/train
+val: images/val
+names: [ball]
