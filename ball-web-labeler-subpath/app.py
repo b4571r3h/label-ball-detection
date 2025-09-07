@@ -98,19 +98,37 @@ def read_meta(td: Path) -> dict:
     return json.loads(f.read_text()) if f.exists() else {}
 
 
-def extract_frames(video_path: Path, out_dir: Path, fps: int) -> int:
-    """Extrahiert Frames mit OpenCV (keine ffmpeg-Abhängigkeit)."""
+def extract_frames(video_path: Path, out_dir: Path, fps: int, max_duration_seconds: int = 120) -> int:
+    """Extrahiert Frames mit OpenCV (keine ffmpeg-Abhängigkeit).
+    
+    Args:
+        video_path: Pfad zum Video
+        out_dir: Ausgabeordner für Frames
+        fps: Gewünschte FPS für Extraktion
+        max_duration_seconds: Maximale Dauer in Sekunden (Standard: 120 = 2 Minuten)
+    """
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise HTTPException(400, f"Kann Video nicht öffnen: {video_path.name}")
 
     native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_duration = total_frames / native_fps
+    
+    # Begrenze auf max_duration_seconds
+    max_frames = int(native_fps * max_duration_seconds)
+    actual_frames = min(total_frames, max_frames)
+    actual_duration = actual_frames / native_fps
+    
+    print(f"Video Info: {video_duration:.1f}s total, processing first {actual_duration:.1f}s ({actual_frames} frames)")
+    
     step = max(int(round(native_fps / max(1, fps))), 1)
     idx = 0
     saved = 0
+    
     while True:
         ok, frame = cap.read()
-        if not ok:
+        if not ok or idx >= actual_frames:
             break
         if idx % step == 0:
             out = out_dir / f"{saved+1:06d}.jpg"
@@ -119,6 +137,10 @@ def extract_frames(video_path: Path, out_dir: Path, fps: int) -> int:
         idx += 1
 
     cap.release()
+    
+    if video_duration > max_duration_seconds:
+        print(f"Video wurde auf {max_duration_seconds}s begrenzt (Original: {video_duration:.1f}s)")
+    
     return saved
 
 
@@ -233,14 +255,27 @@ async def api_ingest_upload(
     with open(vid_path, "wb") as f:
         f.write(await file.read())
 
-    # Frames extrahieren
-    n = extract_frames(vid_path, td / "frames", fps=fps)
+    # Video-Info vorher ermitteln für Metadaten
+    cap = cv2.VideoCapture(str(vid_path))
+    if cap.isOpened():
+        native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_duration = total_frames / native_fps
+        cap.release()
+    else:
+        video_duration = 0
+
+    # Frames extrahieren (max 2 Minuten)
+    n = extract_frames(vid_path, td / "frames", fps=fps, max_duration_seconds=120)
 
     meta = {
         "source": "upload",
         "filename": file.filename,
         "fps": fps,
         "created": dt.datetime.utcnow().isoformat() + "Z",
+        "video_duration_total": round(video_duration, 1),
+        "video_duration_processed": min(video_duration, 120),
+        "limited_to_2min": video_duration > 120
     }
     write_meta(td, meta)
 
@@ -267,14 +302,27 @@ def api_ingest_youtube(
     vid_path = td / f"video{ext}"
     shutil.move(str(ytp), str(vid_path))
 
-    # Frames
-    n = extract_frames(vid_path, td / "frames", fps=fps)
+    # Video-Info vorher ermitteln für Metadaten
+    cap = cv2.VideoCapture(str(vid_path))
+    if cap.isOpened():
+        native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_duration = total_frames / native_fps
+        cap.release()
+    else:
+        video_duration = 0
+
+    # Frames extrahieren (max 2 Minuten)
+    n = extract_frames(vid_path, td / "frames", fps=fps, max_duration_seconds=120)
 
     meta = {
         "source": "youtube",
         "url": url,
         "fps": fps,
         "created": dt.datetime.utcnow().isoformat() + "Z",
+        "video_duration_total": round(video_duration, 1),
+        "video_duration_processed": min(video_duration, 120),
+        "limited_to_2min": video_duration > 120
     }
     write_meta(td, meta)
 

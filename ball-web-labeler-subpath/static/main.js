@@ -232,7 +232,14 @@
       const data = await resp.json().catch(() => ({}));
       if (data.task_id && data.frames) {
         // Erfolgreicher Upload - zum Labeling wechseln
-        setStatus(`✅ Upload erfolgreich! ${data.frames} Frames extrahiert.`);
+        let statusMsg = `✅ Upload erfolgreich! ${data.frames} Frames extrahiert.`;
+        
+        // Warnung wenn Video begrenzt wurde
+        if (data.meta && data.meta.limited_to_2min) {
+          statusMsg += ` ⚠️ Video auf 2 Min begrenzt (Original: ${data.meta.video_duration_total}s).`;
+        }
+        
+        setStatus(statusMsg);
         startLabeling(data.task_id, data.frames);
       } else {
         setStatus(data.status === "ok" ? "Bereit." : JSON.stringify(data));
@@ -274,7 +281,14 @@
       const data = await resp.json().catch(() => ({}));
       if (data.task_id && data.frames) {
         // Erfolgreicher YouTube-Ingest - zum Labeling wechseln
-        setStatus(`✅ YouTube-Ingest erfolgreich! ${data.frames} Frames extrahiert.`);
+        let statusMsg = `✅ YouTube-Ingest erfolgreich! ${data.frames} Frames extrahiert.`;
+        
+        // Warnung wenn Video begrenzt wurde
+        if (data.meta && data.meta.limited_to_2min) {
+          statusMsg += ` ⚠️ Video auf 2 Min begrenzt (Original: ${data.meta.video_duration_total}s).`;
+        }
+        
+        setStatus(statusMsg);
         startLabeling(data.task_id, data.frames);
       } else {
         setStatus(data.status === "ok" ? "Bereit." : JSON.stringify(data));
