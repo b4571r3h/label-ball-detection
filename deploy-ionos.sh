@@ -12,10 +12,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Server-Konfiguration (anpassen!)
-SERVER_USER="your-username"
+# Server-Konfiguration
+SERVER_USER="root"
 SERVER_HOST="87.106.82.60"
-SERVER_PATH="/path/to/deployment"
+SERVER_PATH="/root/tt-apps"
 
 echo -e "${BLUE}📋 Deployment Configuration:${NC}"
 echo -e "  Server: ${SERVER_USER}@${SERVER_HOST}"
@@ -117,3 +117,4 @@ echo -e "${YELLOW}💡 Useful commands for server management:${NC}"
 echo -e "  ssh ${SERVER_USER}@${SERVER_HOST}"
 echo -e "  docker-compose -f compose.ionos.yaml logs -f"
 echo -e "  docker-compose -f compose.ionos.yaml ps"
+
