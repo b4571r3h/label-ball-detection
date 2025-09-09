@@ -1,41 +1,29 @@
-/* static/main.js – robust upload + subpath aware + safe SW */
+/* static/main_simple.js – Nur Ball-Labeling, kein Table-Labeling */
 
 (() => {
-  // ---- Helper: Root-Pfad bestimmen (z.B. /ball-detection) ----
+  // ---- Helper: Root-Pfad bestimmen ----
   function detectRoot() {
-    // Wir mounten die App unter APP_ROOT_PATH in FastAPI.
     const loc = window.location;
     let p = loc.pathname || "/";
     
     console.log("Current pathname:", p);
     
-    // Wenn wir uns in einem Subpath befinden, extrahiere den ersten Pfad-Teil
-    // z.B. "/ball-detection/" -> "/ball-detection"
-    // z.B. "/ball-detection/static/index.html" -> "/ball-detection"  
     const segments = p.split('/').filter(s => s.length > 0);
-    
     console.log("Path segments:", segments);
     
-    // Wenn der erste Segment "ball-detection" ist, verwende das
     if (segments.length > 0 && segments[0] === 'ball-detection') {
       return '/ball-detection';
     }
     
-    // Fallback: Prüfe ob wir direkt unter /ball-detection/ sind
     if (p.startsWith('/ball-detection')) {
       return '/ball-detection';
     }
     
-    // Lokale Entwicklung: kein Subpath
     return '';
   }
   
   const ROOT = detectRoot(); 
   console.log("Detected ROOT:", ROOT, "from pathname:", window.location.pathname);
-  
-  // TEMPORÄRER FIX: Falls Auto-Detection nicht funktioniert
-  // const ROOT = ""; // Für lokale Entwicklung
-  // const ROOT = "/ball-detection"; // Für Docker-Deployment
   
   const API = (path) => {
     const cleanPath = path.startsWith("/") ? path : "/" + path;
@@ -48,394 +36,315 @@
   const fileInput = document.getElementById("file-input-local");
   const fpsInput  = document.getElementById("fps-local");
   const taskInput = document.getElementById("task-local");
-  const btnUpload = document.getElementById("btn-upload");
+  const uploadBtn = document.getElementById("btn-upload");
+  const dropZone  = document.getElementById("dropZone");
+  const statusDiv = document.getElementById("status");
+  
+  const ytUrlInput = document.getElementById("yt-url");
+  const fpsYtInput = document.getElementById("fps-yt");
+  const taskYtInput = document.getElementById("task-yt");
+  const ytBtn = document.getElementById("btn-yt");
+  
+  const labelCard = document.getElementById("labelCard");
+  const taskIdSpan = document.getElementById("taskId");
+  const frameCountSpan = document.getElementById("frameCount");
+  const frameImg = document.getElementById("frameImg");
+  const crosshair = document.getElementById("crosshair");
+  const boxSizeInput = document.getElementById("boxSize");
+  const exportBtn = document.getElementById("exportBtn");
+  const prevBtn = document.getElementById("prevBtn");
+  const skipBtn = document.getElementById("skipBtn");
+  const nextBtn = document.getElementById("nextBtn");
+  const labelStatusDiv = document.getElementById("labelStatus");
 
-  const ytUrl     = document.getElementById("yt-url");
-  const ytFps     = document.getElementById("fps-yt");
-  const ytTask    = document.getElementById("task-yt");
-  const btnYt     = document.getElementById("btn-yt");
+  // ---- State ----
+  let currentTaskId = null;
+  let currentFrameId = 1;
+  let totalFrames = 0;
+  let frames = [];
 
-  const statusEl  = document.getElementById("status");
+  // ---- Event Listeners ----
+  uploadBtn.addEventListener("click", handleUpload);
+  ytBtn.addEventListener("click", handleYouTube);
+  fileInput.addEventListener("change", (e) => {
+    if (e.target.files.length > 0) {
+      uploadBtn.textContent = `Upload ${e.target.files[0].name}`;
+    }
+  });
 
-  function setStatus(msg) {
-    if (statusEl) statusEl.textContent = msg ?? "";
-  }
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "#22c55e";
+  });
 
-  // ---- Labeling Interface aktivieren ----
-  function startLabeling(taskId, frameCount) {
-    // Ingest-Card verstecken, Label-Card anzeigen
-    const ingestCard = document.getElementById("ingestCard");
-    const labelCard = document.getElementById("labelCard");
-    const taskIdEl = document.getElementById("taskId");
-    const frameCountEl = document.getElementById("frameCount");
+  dropZone.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "#374151";
+  });
+
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.style.borderColor = "#374151";
     
-    if (ingestCard) ingestCard.style.display = "none";
-    if (labelCard) labelCard.style.display = "block";
-    if (taskIdEl) taskIdEl.textContent = taskId;
-    if (frameCountEl) frameCountEl.textContent = frameCount;
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      fileInput.files = files;
+      uploadBtn.textContent = `Upload ${files[0].name}`;
+    }
+  });
+
+  // ---- Navigation ----
+  prevBtn.addEventListener("click", prevFrame);
+  skipBtn.addEventListener("click", skipFrame);
+  nextBtn.addEventListener("click", nextFrame);
+  exportBtn.addEventListener("click", exportZip);
+
+  // ---- Keyboard Shortcuts ----
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     
-    // Labeling-Logik initialisieren
-    initLabeling(taskId);
-  }
+    switch(e.key.toLowerCase()) {
+      case 'a': prevFrame(); e.preventDefault(); break;
+      case 'd': nextFrame(); e.preventDefault(); break;
+      case 's': skipFrame(); e.preventDefault(); break;
+    }
+  });
 
-  // ---- Labeling-Logik ----
-  let currentTask = null;
-  let currentFrames = [];
-  let currentFrameIndex = 0;
+  // ---- Frame Click Handler ----
+  frameImg.addEventListener("click", (e) => {
+    if (!currentTaskId) return;
+    
+    const rect = frameImg.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Ball-Labeling: Speichere Ball-Position
+    saveBallLabel(x, y);
+  });
 
-  async function initLabeling(taskId) {
+  // ---- Functions ----
+  async function handleUpload() {
+    const file = fileInput.files[0];
+    if (!file) {
+      setStatus("Bitte wählen Sie eine Datei aus");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("fps", fpsInput.value);
+    if (taskInput.value) formData.append("task_name", taskInput.value);
+
+    setStatus("Uploading...");
+    uploadBtn.disabled = true;
+
     try {
-      currentTask = taskId;
+      const response = await fetch(API("/api/upload"), {
+        method: "POST",
+        body: formData
+      });
+
+      const result = await response.json();
       
-      // Frame-Liste vom Backend holen
-      const resp = await fetch(API(`/api/task/${taskId}/frames`));
-      if (!resp.ok) {
-        setStatus(`Fehler beim Laden der Frames: ${resp.status}`);
-        return;
+      if (result.success) {
+        setStatus(`✅ Upload erfolgreich! Task: ${result.task_id}`);
+        startLabeling(result.task_id);
+      } else {
+        setStatus(`❌ Upload fehlgeschlagen: ${result.error}`);
       }
-      
-      const data = await resp.json();
-      currentFrames = data.frames || [];
-      currentFrameIndex = 0;
-      
-      console.log("Frames geladen:", {taskId, frameCount: currentFrames.length, frames: currentFrames.slice(0, 5)});
-      
-      if (currentFrames.length === 0) {
-        setStatus("Keine Frames gefunden.");
-        return;
-      }
-      
-      // Erstes Frame laden
-      setStatus("Lade erstes Frame...");
-      loadCurrentFrame();
-      updateLabelStatus();
-      
-    } catch (e) {
-      console.error("Fehler beim Initialisieren des Labelings:", e);
-      setStatus("Fehler beim Laden der Frames.");
+    } catch (error) {
+      setStatus(`❌ Upload Fehler: ${error.message}`);
+    } finally {
+      uploadBtn.disabled = false;
     }
   }
 
-  function loadCurrentFrame() {
-    if (!currentTask || !currentFrames[currentFrameIndex]) {
-      console.log("loadCurrentFrame: Missing task or frame", {currentTask, currentFrameIndex, framesLength: currentFrames.length});
+  async function handleYouTube() {
+    const url = ytUrlInput.value.trim();
+    if (!url) {
+      setStatus("Bitte geben Sie eine YouTube-URL ein");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("url", url);
+    formData.append("fps", fpsYtInput.value);
+    if (taskYtInput.value) formData.append("task_name", taskYtInput.value);
+
+    setStatus("YouTube Download...");
+    ytBtn.disabled = true;
+
+    try {
+      const response = await fetch(API("/api/ingest/youtube"), {
+        method: "POST",
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        setStatus(`❌ YouTube Download Fehler (${response.status}): ${errorText}`);
+        return;
+      }
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setStatus(`✅ YouTube Download erfolgreich! Task: ${result.task_id}`);
+        startLabeling(result.task_id);
+      } else {
+        setStatus(`❌ YouTube Download fehlgeschlagen: ${result.error}`);
+      }
+    } catch (error) {
+      setStatus(`❌ YouTube Download Fehler: ${error.message}`);
+    } finally {
+      ytBtn.disabled = false;
+    }
+  }
+
+  function startLabeling(taskId) {
+    currentTaskId = taskId;
+    taskIdSpan.textContent = taskId;
+    
+    // Lade Frame-Liste
+    loadFrames();
+    
+    // Zeige Labeling-Interface
+    labelCard.style.display = "block";
+    labelCard.scrollIntoView({ behavior: "smooth" });
+  }
+
+  async function loadFrames() {
+    try {
+      const response = await fetch(API(`/api/task/${currentTaskId}/frames`));
+      const result = await response.json();
+      
+      if (result.success) {
+        frames = result.frames;
+        totalFrames = frames.length;
+        frameCountSpan.textContent = totalFrames;
+        
+        if (totalFrames > 0) {
+          loadFrame(1);
+        }
+      } else {
+        setStatus(`❌ Fehler beim Laden der Frames: ${result.error}`);
+      }
+    } catch (error) {
+      setStatus(`❌ Fehler beim Laden der Frames: ${error.message}`);
+    }
+  }
+
+  function loadFrame(frameId) {
+    if (frameId < 1 || frameId > totalFrames) return;
+    
+    currentFrameId = frameId;
+    const frame = frames[frameId - 1];
+    
+    frameImg.src = API(`/api/task/${currentTaskId}/frame/${frameId}`);
+    frameImg.onload = () => {
+      setLabelStatus(`Frame ${frameId}/${totalFrames}`);
+    };
+  }
+
+  async function saveBallLabel(x, y) {
+    if (!currentTaskId) return;
+    
+    const imgWidth = frameImg.naturalWidth;
+    const imgHeight = frameImg.naturalHeight;
+    
+    if (imgWidth === 0 || imgHeight === 0) {
+      setLabelStatus("Fehler: Bildgröße konnte nicht ermittelt werden");
       return;
     }
     
-    const frameImg = document.getElementById("frameImg");
-    const filename = currentFrames[currentFrameIndex];
-    const frameUrl = API(`/api/task/${currentTask}/frame/${filename}`);
+    // Normalisiere Koordinaten
+    const normX = (x / frameImg.clientWidth) * (imgWidth / imgWidth);
+    const normY = (y / frameImg.clientHeight) * (imgHeight / imgHeight);
+    const normW = (boxSizeInput.value / frameImg.clientWidth) * (imgWidth / imgWidth);
+    const normH = (boxSizeInput.value / frameImg.clientHeight) * (imgHeight / imgHeight);
     
-    console.log("Loading frame:", {filename, frameUrl, currentTask, currentFrameIndex});
+    const yoloLabel = `0 ${normX.toFixed(6)} ${normY.toFixed(6)} ${normW.toFixed(6)} ${normH.toFixed(6)}`;
     
-    if (frameImg) {
-      frameImg.src = frameUrl;
-      frameImg.alt = `Frame ${currentFrameIndex + 1} / ${currentFrames.length}`;
-      
-      // Debug: Event-Listener für Lade-Erfolg/Fehler
-      frameImg.onload = () => {
-        console.log("Frame erfolgreich geladen:", frameUrl);
-        setStatus(`Frame ${currentFrameIndex + 1} / ${currentFrames.length} - Klicke auf den Ball!`);
-        setupImageInteraction();
-      };
-      
-      frameImg.onerror = () => {
-        console.error("Fehler beim Laden des Frames:", frameUrl);
-        setStatus(`Fehler beim Laden von Frame ${currentFrameIndex + 1}`);
-      };
-    } else {
-      console.error("frameImg Element nicht gefunden!");
-    }
-  }
-
-  // ---- Ball-Markierungen anzeigen ----
-  function setupImageInteraction() {
-    const frameImg = document.getElementById("frameImg");
-    
-    if (!frameImg) return;
-    
-    // Cursor-Style für bessere UX
-    frameImg.style.cursor = "crosshair";
-    
-    // Bestehende Ball-Markierung für aktuelles Frame laden (falls vorhanden)
-    loadExistingLabel();
-  }
-
-  function showBallMarker(relX, relY) {
-    const frameImg = document.getElementById("frameImg");
-    const crosshair = document.getElementById("crosshair");
-    
-    if (!frameImg || !crosshair) return;
-    
-    // Absolute Koordinaten berechnen
-    const rect = frameImg.getBoundingClientRect();
-    const x = relX * frameImg.offsetWidth;
-    const y = relY * frameImg.offsetHeight;
-    
-    // Crosshair positionieren und anzeigen
-    crosshair.style.left = `${x}px`;
-    crosshair.style.top = `${y}px`;
-    crosshair.style.display = "block";
-  }
-
-  function hideBallMarker() {
-    const crosshair = document.getElementById("crosshair");
-    if (crosshair) {
-      crosshair.style.display = "none";
-    }
-  }
-
-  // TODO: Bestehende Labels laden (für bereits markierte Frames)
-  function loadExistingLabel() {
-    // Hier könnten wir später prüfen, ob das aktuelle Frame bereits markiert ist
-    // und die Markierung anzeigen
-    hideBallMarker();
-  }
-
-  function updateLabelStatus() {
-    const labelStatus = document.getElementById("labelStatus");
-    if (labelStatus) {
-      labelStatus.textContent = `Frame ${currentFrameIndex + 1} / ${currentFrames.length}`;
-    }
-  }
-
-  // ---- Upload lokaler Datei ----
-  async function uploadLocal() {
     try {
-      const f = fileInput?.files?.[0];
-      if (!f) {
-        setStatus("Bitte zuerst eine Videodatei auswählen.");
-        return;
-      }
-      const fps = parseInt(fpsInput?.value || "0", 10) || 0;
-      const task = (taskInput?.value || "").trim();
-
-      const fd = new FormData();
-      fd.append("file", f);         // MUSS 'file' heißen (Backend erwartet das)
-      if (fps > 0)  fd.append("fps", String(fps));
-      if (task)     fd.append("task", task);
-
-      setStatus("Lade hoch & extrahiere Frames …");
-      const resp = await fetch(API("/api/ingest/upload"), {
-        method: "POST",
-        body: fd, // KEIN Content-Type setzen, Browser macht multipart/form-data
-      });
-
-      if (!resp.ok) {
-        // Fehlermeldung des Backends anzeigen
-        let err = "";
-        try { err = await resp.text(); } catch {}
-        setStatus(`Fehler beim Upload (${resp.status}): ${err}`);
-        return;
-      }
-
-      const data = await resp.json().catch(() => ({}));
-      if (data.task_id && data.frames) {
-        // Erfolgreicher Upload - zum Labeling wechseln
-        let statusMsg = `✅ Upload erfolgreich! ${data.frames} Frames extrahiert.`;
-        
-        // Warnung wenn Video begrenzt wurde
-        if (data.meta && data.meta.limited_to_2min) {
-          statusMsg += ` ⚠️ Video auf 2 Min begrenzt (Original: ${data.meta.video_duration_total}s).`;
-        }
-        
-        setStatus(statusMsg);
-        startLabeling(data.task_id, data.frames);
-      } else {
-        setStatus(data.status === "ok" ? "Bereit." : JSON.stringify(data));
-      }
-    } catch (e) {
-      console.error(e);
-      setStatus("Unerwarteter Fehler beim Upload. Siehe Konsole.");
-    }
-  }
-
-  // ---- YouTube-Ingest ----
-  async function ingestYouTube() {
-    try {
-      const url = (ytUrl?.value || "").trim();
-      if (!url) {
-        setStatus("Bitte eine YouTube-URL einfügen.");
-        return;
-      }
-      const fps = parseInt(ytFps?.value || "0", 10) || 0;
-      const task = (ytTask?.value || "").trim();
-
-      const body = { url };
-      if (fps > 0) body.fps = fps;
-      if (task) body.task = task;
-
-      setStatus("YouTube-Video wird geladen & Frames werden extrahiert …");
-      const resp = await fetch(API("/api/ingest/youtube"), {
+      const response = await fetch(API("/api/save-label"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          task_id: currentTaskId,
+          frame_id: currentFrameId,
+          label: yoloLabel
+        })
       });
-
-      if (!resp.ok) {
-        let err = "";
-        try { err = await resp.text(); } catch {}
-        setStatus(`Fehler beim YouTube-Ingest (${resp.status}): ${err}`);
-        return;
-      }
-      const data = await resp.json().catch(() => ({}));
-      if (data.task_id && data.frames) {
-        // Erfolgreicher YouTube-Ingest - zum Labeling wechseln
-        let statusMsg = `✅ YouTube-Ingest erfolgreich! ${data.frames} Frames extrahiert.`;
-        
-        // Warnung wenn Video begrenzt wurde
-        if (data.meta && data.meta.limited_to_2min) {
-          statusMsg += ` ⚠️ Video auf 2 Min begrenzt (Original: ${data.meta.video_duration_total}s).`;
-        }
-        
-        setStatus(statusMsg);
-        startLabeling(data.task_id, data.frames);
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setLabelStatus(`✅ Ball-Label gespeichert! Frame ${currentFrameId}`);
+        // Automatisch zum nächsten Frame
+        setTimeout(() => nextFrame(), 500);
       } else {
-        setStatus(data.status === "ok" ? "Bereit." : JSON.stringify(data));
+        setLabelStatus(`❌ Fehler beim Speichern: ${result.error}`);
       }
-    } catch (e) {
-      console.error(e);
-      setStatus("Unerwarteter Fehler beim YouTube-Ingest. Siehe Konsole.");
+    } catch (error) {
+      setLabelStatus(`❌ Fehler beim Speichern: ${error.message}`);
     }
   }
 
-  // ---- Navigation-Funktionen ----
   function prevFrame() {
-    if (currentFrameIndex > 0) {
-      currentFrameIndex--;
-      loadCurrentFrame();
-      updateLabelStatus();
+    if (currentFrameId > 1) {
+      loadFrame(currentFrameId - 1);
     }
   }
 
   function nextFrame() {
-    if (currentFrameIndex < currentFrames.length - 1) {
-      currentFrameIndex++;
-      loadCurrentFrame();
-      updateLabelStatus();
+    if (currentFrameId < totalFrames) {
+      loadFrame(currentFrameId + 1);
     }
   }
 
   function skipFrame() {
-    // Wie nextFrame(), aber könnte später für Skip-Logik erweitert werden
     nextFrame();
   }
 
-  // ---- Ball-Labeling ----
-  async function labelBall(x, y) {
-    if (!currentTask || !currentFrames[currentFrameIndex]) return;
+  async function exportZip() {
+    if (!currentTaskId) return;
     
-    const frameImg = document.getElementById("frameImg");
-    const boxSize = parseInt(document.getElementById("boxSize")?.value || "24");
-    
-    if (!frameImg) return;
-    
-    // Relative Koordinaten berechnen (0-1)
-    const rect = frameImg.getBoundingClientRect();
-    const relX = (x - rect.left) / rect.width;
-    const relY = (y - rect.top) / rect.height;
-    
-    const filename = currentFrames[currentFrameIndex];
+    setStatus("Exportiere ZIP...");
+    exportBtn.disabled = true;
     
     try {
-      // Backend erwartet absolute Pixel-Koordinaten
-      const rect = frameImg.getBoundingClientRect();
-      const absX = relX * frameImg.naturalWidth;
-      const absY = relY * frameImg.naturalHeight;
+      const response = await fetch(API(`/api/task/${currentTaskId}/export`));
       
-      const resp = await fetch(API(`/api/task/${currentTask}/label`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: filename,
-          cx: absX,
-          cy: absY,
-          box: boxSize
-        }),
-      });
-      
-      if (!resp.ok) {
-        setStatus(`Fehler beim Speichern: ${resp.status}`);
-        return;
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${currentTaskId}_labels.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        setStatus("✅ ZIP erfolgreich heruntergeladen!");
+      } else {
+        setStatus("❌ Export fehlgeschlagen");
       }
-      
-      const data = await resp.json();
-      setStatus(`✅ Ball markiert in ${filename} - Frame ${currentFrameIndex + 1}/${currentFrames.length}`);
-      
-      // Ball-Markierung anzeigen
-      showBallMarker(relX, relY);
-      
-      // Automatisch zum nächsten Frame
-      setTimeout(() => {
-        nextFrame();
-      }, 800);
-      
-    } catch (e) {
-      console.error("Fehler beim Ball-Labeling:", e);
-      setStatus("Fehler beim Speichern der Ball-Position.");
+    } catch (error) {
+      setStatus(`❌ Export Fehler: ${error.message}`);
+    } finally {
+      exportBtn.disabled = false;
     }
   }
 
-  // ---- Events binden ----
-  if (btnUpload) btnUpload.addEventListener("click", (e) => {
-    e.preventDefault();
-    uploadLocal();
-  });
-  if (btnYt) btnYt.addEventListener("click", (e) => {
-    e.preventDefault();
-    ingestYouTube();
-  });
-
-  // Navigation-Buttons
-  const prevBtn = document.getElementById("prevBtn");
-  const nextBtn = document.getElementById("nextBtn");
-  const skipBtn = document.getElementById("skipBtn");
-
-  if (prevBtn) prevBtn.addEventListener("click", prevFrame);
-  if (nextBtn) nextBtn.addEventListener("click", nextFrame);
-  if (skipBtn) skipBtn.addEventListener("click", skipFrame);
-
-  // Ball-Labeling: Klick auf Bild
-  document.addEventListener("click", (e) => {
-    if (currentTask && e.target && e.target.id === "frameImg") {
-      e.preventDefault();
-      labelBall(e.clientX, e.clientY);
-    }
-  });
-
-  // Ball-Labeling: Touch für Smartphones
-  document.addEventListener("touchstart", (e) => {
-    if (currentTask && e.target && e.target.id === "frameImg") {
-      e.preventDefault();
-      if (e.touches.length > 0) {
-        const touch = e.touches[0];
-        labelBall(touch.clientX, touch.clientY);
-      }
-    }
-  });
-
-  // Tastatur-Shortcuts
-  document.addEventListener("keydown", (e) => {
-    if (currentTask) { // Nur aktiv wenn Labeling läuft
-      switch(e.key.toLowerCase()) {
-        case 'a': prevFrame(); e.preventDefault(); break;
-        case 'd': nextFrame(); e.preventDefault(); break;
-        case 's': skipFrame(); e.preventDefault(); break;
-      }
-    }
-  });
-
-  // ---- Service Worker nur, wenn erlaubt (https/secure) ----
-  try {
-    if ("serviceWorker" in navigator && window.isSecureContext) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register(`${ROOT}/sw.js`).catch(() => {});
-      });
-    }
-  } catch {
-    // ignorieren – nicht kritisch
+  function setStatus(message) {
+    statusDiv.textContent = message;
+    console.log("Status:", message);
   }
 
-  // Init
-  setStatus("Bereit.");
+  function setLabelStatus(message) {
+    labelStatusDiv.textContent = message;
+    console.log("Label Status:", message);
+  }
+
 })();
