@@ -31,6 +31,18 @@
 <body>
   <div class="wrap">
     <h1>🏓 TT Ball Labeler für TTAI <span class="muted">(YouTube & Upload)</span></h1>
+    
+    <!-- Ball Labeling Only -->
+    <div class="card" style="margin-bottom:16px;">
+      <div class="row" style="align-items:center; justify-content:center;">
+        <div style="margin-right:16px;">
+          <strong>🏓 Ball-Labeling:</strong>
+        </div>
+        <div class="muted">
+          Klicken Sie auf Bälle im Video um sie zu markieren
+        </div>
+      </div>
+    </div>
 
     <div class="card" id="ingestCard">
       <div class="row">
@@ -63,15 +75,70 @@
         </div>
       </div>
 
-      <div id="imgBox" style="margin-top:12px;">
+      <div id="imgBox" style="margin-top:12px; position: relative; display: inline-block;">
         <img id="frameImg" src="" alt="frame" />
         <div id="crosshair"></div>
+        <!-- Zoom-Lupe -->
+        <div id="zoom-magnifier" style="
+          position: absolute;
+          width: 120px;
+          height: 120px;
+          border: 2px solid #22c55e;
+          border-radius: 50%;
+          background: white;
+          display: none;
+          pointer-events: none;
+          z-index: 1000;
+          overflow: hidden;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        ">
+          <img id="zoom-img" src="" style="
+            position: absolute;
+            pointer-events: none;
+          " />
+          <!-- Fadenkreuz -->
+          <div style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            pointer-events: none;
+            z-index: 1001;
+          ">
+            <!-- Vertikale Linie -->
+            <div style="
+              position: absolute;
+              top: 0;
+              left: 50%;
+              width: 1px;
+              height: 20px;
+              background: #ef4444;
+              margin-left: -0.5px;
+              box-shadow: 0 0 2px rgba(0,0,0,0.5);
+            "></div>
+            <!-- Horizontale Linie -->
+            <div style="
+              position: absolute;
+              top: 50%;
+              left: 0;
+              width: 20px;
+              height: 1px;
+              background: #ef4444;
+              margin-top: -0.5px;
+              box-shadow: 0 0 2px rgba(0,0,0,0.5);
+            "></div>
+          </div>
+        </div>
       </div>
       <div class="row" style="margin-top:8px;">
         <button class="btn" id="prevBtn">◀ Zurück (A)</button>
-        <button class="btn" id="skipBtn">⏭️ Skip (S)</button>
+        <button class="btn" id="skipBtn">💾 Speichern/Skip (S)</button>
         <button class="btn" id="nextBtn">Weiter (D) ▶</button>
-        <div class="muted">Tippen/Klick in das Bild setzt die Ball-Mitte & speichert</div>
+        <div class="muted" id="click-instruction">
+          Ball-Labeling: Klick setzt Ball-Mitte & speichert automatisch
+        </div>
       </div>
       <div class="muted" id="labelStatus" style="margin-top:6px;">–</div>
     </div>

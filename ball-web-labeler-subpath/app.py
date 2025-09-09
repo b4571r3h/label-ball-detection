@@ -443,6 +443,10 @@ else:
 # Dev-Server
 # ---------------------------------------------------------------------
 
+
+# Table-Labeling entfernt - nur noch Ball-Labeling
+
+
 if __name__ == "__main__":
     import uvicorn
     # Lokal starten: python app.py
