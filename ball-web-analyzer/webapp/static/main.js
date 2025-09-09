@@ -48,6 +48,7 @@
   const calibrationStatus = document.getElementById("calibrationStatus");
   const resetCalibBtn = document.getElementById("resetCalibBtn");
   const saveCalibBtn = document.getElementById("saveCalibBtn");
+  // Automatische Kalibrierung entfernt
   
   const analysisCard = document.getElementById("analysisCard");
   const confidenceSlider = document.getElementById("confidenceSlider");
@@ -292,6 +293,28 @@
     }
   }
 
+  
+  function addVisualCalibrationPoint(originalX, originalY, index) {
+    // Berechne Display-Koordinaten
+    const rect = calibrationImg.getBoundingClientRect();
+    const scaleX = rect.width / calibrationImg.naturalWidth;
+    const scaleY = rect.height / calibrationImg.naturalHeight;
+    
+    const displayX = originalX * scaleX;
+    const displayY = originalY * scaleY;
+    
+    // Erstelle visuellen Punkt
+    const point = document.createElement('div');
+    point.className = 'calibPoint';
+    point.style.left = displayX + 'px';
+    point.style.top = displayY + 'px';
+    
+    const labels = ["TL", "TR", "BR", "BL"];
+    point.textContent = labels[index];
+    
+    calibrationArea.appendChild(point);
+  }
+
   // ---- Loading Screen Funktionen ----
   function showLoadingScreen() {
     document.getElementById("loadingOverlay").style.display = "flex";
@@ -495,6 +518,7 @@
   if (ytBtn) ytBtn.addEventListener("click", loadYouTube);
   if (resetCalibBtn) resetCalibBtn.addEventListener("click", resetCalibration);
   if (saveCalibBtn) saveCalibBtn.addEventListener("click", saveCalibration);
+  // Automatische Kalibrierung entfernt
   if (analyzeBtn) analyzeBtn.addEventListener("click", analyzeVideo);
 
   // Konfidenz-Slider

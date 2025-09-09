@@ -16,11 +16,40 @@ from typing import Optional, List
 
 import cv2
 import numpy as np
+import logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+
+logger = logging.getLogger(__name__)
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Nur manuelle Tisch-Kalibrierung - keine automatische Erkennung
+
+def order_points(pts):
+    """Sortiert Punkte in der Reihenfolge: oben-links, oben-rechts, unten-rechts, unten-links"""
+    rect = np.zeros((4, 2), dtype=np.float32)
+    
+    # Summe und Differenz der Koordinaten
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1)
+    
+    # oben-links hat die kleinste Summe
+    rect[0] = pts[np.argmin(s)]
+    
+    # unten-rechts hat die größte Summe
+    rect[2] = pts[np.argmax(s)]
+    
+    # oben-rechts hat die kleinste Differenz
+    rect[1] = pts[np.argmin(diff)]
+    
+    # unten-links hat die größte Differenz
+    rect[3] = pts[np.argmax(diff)]
+    
+    return rect
+
+AUTO_TABLE_DETECTION = False  # Deaktiviert - nur manuelle Kalibrierung
 
 # ---- Konfiguration ----
 # Für lokale Entwicklung: ./data, für Docker: /data/analyzer
@@ -32,9 +61,9 @@ APP_ROOT_PATH = os.getenv("APP_ROOT_PATH", "").rstrip("/")  # z.B. "/ball-analyz
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 print(f"📁 Data Directory: {DATA_DIR.absolute()}")
 
-# YOLO Modell-Pfad (relativ zur ball-web-analyzer)
+# YOLO Modell-Pfad (nur Ball-Detection)
 YOLO_WEIGHTS = Path(__file__).resolve().parents[1] / "runs/detect/train4/weights/best.pt"
-INFER_SCRIPT = Path(__file__).resolve().parents[1] / "infer_bounce_heatmap.py"
+INFER_SCRIPT = Path(__file__).resolve().parents[1] / "infer_bounce_heatmap.py"  # Original-Script ohne Table-Detection
 TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
 
 print(f"YOLO Weights: {YOLO_WEIGHTS}")
@@ -82,6 +111,10 @@ def analysis_dir(analysis_id: str) -> Path:
     """Gibt das Verzeichnis für eine Analysis zurück"""
     return DATA_DIR / analysis_id.replace("/", os.sep)
 
+def get_current_model_path() -> str:
+    """Gibt den Pfad zum aktuellen YOLO-Modell zurück"""
+    return str(YOLO_WEIGHTS)
+
 def download_youtube(url: str) -> Path:
     """Lädt YouTube-Video herunter"""
     try:
@@ -126,8 +159,8 @@ def run_analysis(video_path: Path, calib_path: Path, output_dir: Path, confidenc
     """Führt die YOLO-Analyse und Heatmap-Generierung aus"""
     
     if not YOLO_WEIGHTS.exists():
-        raise HTTPException(500, f"YOLO-Modell nicht gefunden: {YOLO_WEIGHTS}")
-    
+        raise HTTPException(500, f"Ball-YOLO-Modell nicht gefunden: {YOLO_WEIGHTS}")
+        
     if not INFER_SCRIPT.exists():
         raise HTTPException(500, f"Inference-Script nicht gefunden: {INFER_SCRIPT}")
     
@@ -135,22 +168,20 @@ def run_analysis(video_path: Path, calib_path: Path, output_dir: Path, confidenc
     csv_path = output_dir / "bounces.csv"
     preview_path = output_dir / "preview.mp4"
     
-    # Tisch-Hintergrundbild für Heatmap
-    table_bg = Path(__file__).resolve().parents[1] / "assets" / "table_background.png"
-    
+    # Zurück zum Original-Script mit manueller Kalibrierung
     cmd = [
         sys.executable, str(INFER_SCRIPT),
         "--weights", str(YOLO_WEIGHTS),
         "--source", str(video_path),
         "--conf", str(confidence),
-        "--imgsz", "640",
-        "--calib", str(calib_path),
         "--save_heatmap", str(heatmap_path),
         "--save_csv", str(csv_path),
         "--save_preview", str(preview_path),
+        "--calib", str(calib_path)
     ]
     
-    # Hintergrundbild hinzufügen, falls vorhanden
+    # Tisch-Hintergrundbild (optional)
+    table_bg = Path(__file__).resolve().parents[1] / "assets" / "table_background.png"
     if table_bg.exists():
         cmd.extend(["--bg_image", str(table_bg)])
         print(f"🏓 Using table background: {table_bg}")
@@ -185,7 +216,7 @@ def health():
     """Health Check"""
     return {
         "status": "ok",
-        "yolo_model": YOLO_WEIGHTS.exists(),
+        "ball_yolo_model": YOLO_WEIGHTS.exists(),
         "infer_script": INFER_SCRIPT.exists()
     }
 
@@ -482,8 +513,7 @@ app = core
 # ---- Entwicklungsserver ----
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("fastapi_app:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("fastapi_app:app", host="0.0.0.0", port=5001, reload=False)
 
-@core.get("/api/health")
-def health_check():
-    return {"status": "healthy", "service": "ball-analyzer"}
+# Doppelter Health-Check entfernt
+
