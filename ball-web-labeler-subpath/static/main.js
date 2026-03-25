@@ -47,6 +47,7 @@
 
   async function refreshGlobalLabeledTotal() {
     if (!globalLabeledCount) return;
+    const breakdown = document.getElementById("globalLabeledBreakdown");
     try {
       const r = await fetch(API("/api/stats/labeled-total"));
       if (!r.ok) return;
@@ -54,8 +55,15 @@
       globalLabeledCount.textContent = String(
         typeof d.labeled === "number" ? d.labeled : 0
       );
+      if (breakdown) {
+        const li = typeof d.labeled_labeler === "number" ? d.labeled_labeler : 0;
+        const im = typeof d.labeled_import === "number" ? d.labeled_import : 0;
+        breakdown.textContent =
+          im > 0 ? ` (${li} in der App · ${im} Import)` : "";
+      }
     } catch (_) {
       globalLabeledCount.textContent = "–";
+      if (breakdown) breakdown.textContent = "";
     }
   }
 

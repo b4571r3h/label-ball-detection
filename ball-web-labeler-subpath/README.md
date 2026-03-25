@@ -4,22 +4,25 @@ FastAPI-Backend + statische UI zum Labeln von Tischtennis-Bällen (YOLO-Format).
 
 ## Training / YOLO Export
 
-### Voll-Export (alle Tasks, ein ZIP)
+### Voll-Export (Labeler + optional Server-Import)
+
+Die Startseite zeigt unter „Frames gelabelt“ die Summe aus **Web-Labeler** (`LABEL_DATA_DIR`) und **Import-Ordner** (`IMPORT_YOLO_BALL_DIR`) — wie `/api/stats/labeled-total`. Der Voll-Export enthält **standardmäßig beides** (`include_import=true`), damit die ZIP-Größe zur Anzeige passt.
 
 - **Endpunkt:** `GET /api/export/yolo-dataset-full`
 - **Query (Defaults):**
-  - `val_fraction=0.2` (0.05–0.5)
+  - `val_fraction=0.2` (0.05–0.5) — gilt nur für den **Labeler**-Anteil
   - `seed=42`
-  - `strategy=global_split` oder `per_task_split`
-    - **global_split** (Standard): alle gelabelten Bild+Label-Paare werden gemischt, dann ein gemeinsamer Train/Val-Split — sinnvoll für ein einziges Gesamtmodell.
-    - **per_task_split**: je Task ein eigener Split; die Mengen werden vereinigt (ohne Mischen zwischen Tasks innerhalb eines Splits).
+  - `include_import=true` — `false` = nur Daten aus der Web-App (kein `IMPORT_YOLO_BALL_DIR`)
+  - `strategy=global_split` oder `per_task_split` — nur für den Labeler-Teil; **Import** behält die bestehenden Ordner `images/train` und `images/val` und wird **ohne Neu-Split** angehängt
+    - **global_split** (Standard): alle Labeler-Paare gemischt, dann ein Train/Val-Split
+    - **per_task_split**: je Task ein eigener Split; Vereinigung der Mengen
 
 **Antwort:** `200`, `Content-Type: application/zip`, Dateiname `spinvo-yolo-dataset-full.zip`.
 
 Nach dem Entpacken:
 
 - `dataset.yaml` (`path: .`, `train: images/train`, `val: images/val`, `nc: 1`, `names: ['ball']`)
-- `images/train/`, `images/val/` (`.jpg`)
+- `images/train/`, `images/val/` (überwiegend `.jpg` aus dem Labeler; Import kann je nach Daten auch `.png` usw. enthalten)
 - `labels/train/`, `labels/val/` (`.txt`, gleicher Basisname wie das Bild)
 
 **Negativ-Beispiele („kein Ball“):** Es existiert eine `.txt` pro Bild; Inhalt kann leer sein (0 Bytes).
@@ -52,7 +55,7 @@ yolo detect train data=data/spinevo_ball/dataset.yaml model=yolov8n.pt epochs=10
 
 ### Metriken vor dem Download
 
-`GET /api/stats/labeled-export` → u. a. `frames_total`, `tasks_included`.  
+`GET /api/stats/labeled-export` → u. a. `frames_total` (Summe wie im Voll-Export mit Standard-`include_import`), `frames_total_labeler`, `frames_total_import`, `tasks_included`.  
 `last_export_build` ist aktuell immer `null` (Platzhalter für späteres Caching).
 
 ### Optionale Absicherung

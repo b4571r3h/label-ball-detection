@@ -18,7 +18,7 @@ Features
 - /api/export/import-yolo-zip: ZIP des Import-Ordners (für lokales Training)
 - /api/task/{id}/export: ZIP flach (images/, labels/)
 - /api/task/{id}/export-yolo-split: ZIP für Training (images/train|val, labels/train|val)
-- /api/export/yolo-dataset-full: Ein ZIP über alle Labeler-Tasks (globaler oder pro-Task-Split)
+- /api/export/yolo-dataset-full: Ein ZIP (Labeler + standardmäßig IMPORT_YOLO_BALL_DIR, Query include_import)
 - /api/stats/labeled-export: Metriken für Voll-Export (Frames, Tasks)
 - /api/health:          Healthcheck
 
@@ -364,7 +364,8 @@ _core_kw = {
     "title": "SpinEvo Ball Detection Labeler API",
     "description": (
         "**YOLOv8 Voll-Export:** `GET /api/export/yolo-dataset-full` liefert ein ZIP mit "
-        "`dataset.yaml`, `images/train`, `images/val`, `labels/train`, `labels/val`. "
+        "`dataset.yaml`, `images/train`, `images/val`, `labels/train`, `labels/val` "
+        "(standardmäßig Labeler-Daten + optional `IMPORT_YOLO_BALL_DIR`, vgl. `/api/stats/labeled-total`). "
         "Labels: eine Zeile pro Box `0 cx cy w h` (normalisiert); Negativ-Beispiele = leere `.txt`. "
         "**Auth (optional):** Wenn die Umgebungsvariable `BALL_DETECTION_EXPORT_API_KEY` gesetzt ist, "
         "Header `Authorization: Bearer <gleicher Wert>` für diesen Endpunkt und "
@@ -587,6 +588,41 @@ def iter_labeler_yolo_pairs() -> list[tuple[str, Path, Path]]:
     return out
 
 
+def iter_import_yolo_split_pairs(
+    root: Optional[Path],
+) -> tuple[list[tuple[str, Path, Path]], list[tuple[str, Path, Path]]]:
+    """
+    Paare aus IMPORT_YOLO_BALL_DIR mit bestehender train/val-Zuordnung.
+    pseudo_task_id pro Split, damit export_unique_stem kollisionsfrei bleibt.
+    """
+    train_out: list[tuple[str, Path, Path]] = []
+    val_out: list[tuple[str, Path, Path]] = []
+    if root is None or not str(root).strip() or not root.is_dir():
+        return train_out, val_out
+    root = root.resolve()
+    for split_name, bucket in (("train", train_out), ("val", val_out)):
+        idir = root / "images" / split_name
+        ldir = root / "labels" / split_name
+        if not idir.is_dir() or not ldir.is_dir():
+            continue
+        pseudo = f"__yolo_import__/{split_name}"
+        for img in sorted(idir.iterdir()):
+            if not img.is_file():
+                continue
+            if img.suffix.lower() not in IMPORT_YOLO_IMG_EXT:
+                continue
+            lab = (ldir / f"{img.stem}.txt").resolve()
+            if not lab.is_file():
+                continue
+            try:
+                img.resolve().relative_to(root)
+                lab.relative_to(root)
+            except ValueError:
+                continue
+            bucket.append((pseudo, img.resolve(), lab))
+    return train_out, val_out
+
+
 def export_unique_stem(task_id: str, frame_filename: str) -> str:
     """Eindeutiger Basisname (ohne Extension) für Bild + Label im ZIP über alle Tasks."""
     pfx = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:12]
@@ -653,14 +689,18 @@ def build_yolo_full_zip_file(
         for split_name, plist in (("train", train_pairs), ("val", val_pairs)):
             for task_id, img_p, lab_p in plist:
                 stem = export_unique_stem(task_id, img_p.name)
-                arc_img = f"images/{split_name}/{stem}.jpg"
+                sfx = img_p.suffix.lower()
+                if sfx not in IMPORT_YOLO_IMG_EXT:
+                    sfx = ".jpg"
+                arc_img = f"images/{split_name}/{stem}{sfx}"
                 arc_lab = f"labels/{split_name}/{stem}.txt"
                 zf.write(img_p, arcname=arc_img)
                 zf.write(lab_p, arcname=arc_lab)
 
         comment = (
             f"# SpinEvo Ball-Detection Voll-Export; strategy={strategy.value}; "
-            "Negativ: leere .txt (0 Bytes) pro Bild.\n"
+            "Negativ: leere .txt (0 Bytes) pro Bild. "
+            "Import-Ordner (falls enthalten): bestehende train/val-Pfade, ohne Neu-Split.\n"
         )
         dataset_yaml = comment + (
             "path: .\n"
@@ -805,13 +845,18 @@ def api_stats_labeled_export():
     Anzahl gelabelter Frames (Labeler-Datenbank) und beteiligte Tasks.
     `last_export_build`: reserviert für zukünftiges serverseitiges Caching (derzeit immer null).
     """
-    pairs = iter_labeler_yolo_pairs()
-    tasks = {p[0] for p in pairs}
+    pairs_l = iter_labeler_yolo_pairs()
+    imp_tr, imp_va = iter_import_yolo_split_pairs(IMPORT_YOLO_BALL_DIR)
+    tasks = {p[0] for p in pairs_l} | {p[0] for p in imp_tr + imp_va}
+    n_imp = len(imp_tr) + len(imp_va)
     return {
-        "frames_total": len(pairs),
+        "frames_total": len(pairs_l) + n_imp,
+        "frames_total_labeler": len(pairs_l),
+        "frames_total_import": n_imp,
         "tasks_included": len(tasks),
         "split_strategies": ["global_split", "per_task_split"],
         "default_strategy": YoloFullExportStrategy.global_split.value,
+        "import_in_full_export_default": True,
         "last_export_build": None,
     }
 
@@ -819,7 +864,7 @@ def api_stats_labeled_export():
 @core.get(
     "/api/export/yolo-dataset-full",
     tags=["export"],
-    summary="YOLOv8-Dataset-ZIP über alle Labeler-Tasks",
+    summary="YOLOv8-Dataset-ZIP (Labeler + optional Import)",
     response_class=FileResponse,
     responses={
         422: {
@@ -836,39 +881,61 @@ def api_export_yolo_dataset_full(
         0.2,
         ge=0.05,
         le=0.5,
-        description="Anteil Validierung (global oder pro Task, je nach strategy).",
+        description="Anteil Validierung (nur Labeler-Teil; Import behält images/train|val).",
     ),
     seed: int = Query(42, description="Zufalls-Seed für reproduzierbaren Split."),
     strategy: YoloFullExportStrategy = Query(
         YoloFullExportStrategy.global_split,
         description=(
-            "`global_split`: alle Paare aus allen Tasks werden gemischt, dann ein Train/Val-Split "
-            "(empfohlen für ein einzelnes Gesamtmodell). "
-            "`per_task_split`: je Task ein eigener Split nach demselben val_fraction/Seed-Ableitung; "
-            "Ergebnis-Trainings- und Validierungsmengen sind die Vereinigungen — ohne Mischen "
-            "zwischen Tasks innerhalb eines Splits."
+            "Gilt nur für Daten unter LABEL_DATA_DIR: "
+            "`global_split` mischt alle Labeler-Paare, dann ein Train/Val-Split; "
+            "`per_task_split` splittet je Task. "
+            "Daten aus IMPORT_YOLO_BALL_DIR (wenn `include_import=true`) werden **ohne Neu-Split** "
+            "den bestehenden Ordnern `images/train|val` zugeordnet und angehängt."
+        ),
+    ),
+    include_import: bool = Query(
+        True,
+        description=(
+            "Wenn true und IMPORT_YOLO_BALL_DIR gesetzt: zusätzlich alle Paare aus "
+            "`images/{train,val}` + `labels/{train,val}` des Import-Ordners (wie Zähler „labeled-total“)."
         ),
     ),
 ):
     """
     Ein ZIP für `yolo detect train data=.../dataset.yaml`.
 
-    **Inhalt:** `dataset.yaml` (path `.`, train/val relativ), `images/train|val/*.jpg`,
-    `labels/train|val/*.txt` (gleicher Basisname wie Bild). Dateinamen sind über alle Tasks eindeutig
-    (Präfix = SHA256-Fragment der `task_id`).
+    **Inhalt:** `dataset.yaml` (path `.`, train/val relativ), `images/train|val/*`,
+    `labels/train|val/*.txt` (gleicher Basisname wie Bild). Dateinamen sind über alle Quellen eindeutig
+    (Präfix = SHA256-Fragment der internen Task-/Split-Kennung).
 
     **Hinweis:** Sehr große Datenmengen werden synchron als ZIP auf dem Server gebaut (Temp-Datei);
     bei Timeout-Problemen später ggf. asynchronen Job einplanen.
     """
-    pairs = iter_labeler_yolo_pairs()
-    if not pairs:
+    pairs_l = iter_labeler_yolo_pairs()
+    if include_import:
+        imp_train, imp_val = iter_import_yolo_split_pairs(IMPORT_YOLO_BALL_DIR)
+    else:
+        imp_train, imp_val = [], []
+
+    if not pairs_l and not imp_train and not imp_val:
         raise HTTPException(
             status_code=422,
-            detail="Keine gelabelten Frames im Datenverzeichnis (kein Bild mit passender labels/*.txt).",
+            detail=(
+                "Keine exportierbaren Paare: weder Labeler (DATA_DIR mit frames+labels) "
+                "noch Import (IMPORT_YOLO_BALL_DIR mit include_import=true)."
+            ),
         )
-    train_pairs, val_pairs = train_val_for_full_export(
-        pairs, val_fraction=val_fraction, seed=seed, strategy=strategy
-    )
+
+    if pairs_l:
+        train_l, val_l = train_val_for_full_export(
+            pairs_l, val_fraction=val_fraction, seed=seed, strategy=strategy
+        )
+    else:
+        train_l, val_l = [], []
+
+    train_pairs = train_l + imp_train
+    val_pairs = val_l + imp_val
     zip_path = build_yolo_full_zip_file(train_pairs, val_pairs, strategy)
     return FileResponse(
         path=str(zip_path),
