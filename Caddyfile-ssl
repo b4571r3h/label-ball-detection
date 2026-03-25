@@ -34,5 +34,13 @@ app.basti-reh.de {
     respond "🏓 TT Ball Detection & Analysis Platform (HTTPS)" 200
 }
 
+# Labeler eigene Subdomain (optional)
+# DNS: A/AAAA für diesen Hostnamen auf die Server-IP zeigen (z. B. bei IONOS DNS).
+# Pfade werden auf /ball-detection/* gemappt (gleicher Container wie oben, APP_ROOT_PATH bleibt /ball-detection).
+labeler.basti-reh.de {
+    rewrite * /ball-detection{http.request.uri}
+    reverse_proxy tt-ball-labeler:8000
+}
+
 # HTTP zu HTTPS Redirect (automatisch von Caddy)
 # Caddy leitet automatisch HTTP-Traffic zu HTTPS um
