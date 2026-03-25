@@ -77,6 +77,11 @@
   let totalFrames = 0;
   let frames = [];
 
+  /** Nach Wisch-Geste „Kein Ball“: verhindert den künstlichen Klick aufs Bild (Mobile). */
+  let ignoreImgClickUntil = 0;
+  let swipeTouchStartX = null;
+  let swipeTouchStartY = null;
+
   // ---- Event Listeners ----
   uploadBtn.addEventListener("click", handleUpload);
   ytBtn.addEventListener("click", handleYouTube);
@@ -125,9 +130,57 @@
     }
   });
 
+  // ---- Smartphone: Wisch rechts → links = „Kein Ball“ (wie Button) ----
+  const SWIPE_MIN_DX = 56;
+  const SWIPE_MAX_VERTICAL_RATIO = 0.75;
+
+  if (imgBox) {
+    imgBox.addEventListener(
+      "touchstart",
+      (e) => {
+        if (!currentTaskId || e.touches.length !== 1) return;
+        swipeTouchStartX = e.touches[0].clientX;
+        swipeTouchStartY = e.touches[0].clientY;
+      },
+      { passive: true }
+    );
+
+    imgBox.addEventListener(
+      "touchend",
+      (e) => {
+        if (!currentTaskId || swipeTouchStartX == null) return;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - swipeTouchStartX;
+        const dy = t.clientY - swipeTouchStartY;
+        swipeTouchStartX = null;
+        swipeTouchStartY = null;
+
+        if (
+          dx <= -SWIPE_MIN_DX &&
+          Math.abs(dy) <= Math.abs(dx) * SWIPE_MAX_VERTICAL_RATIO
+        ) {
+          e.preventDefault();
+          ignoreImgClickUntil = Date.now() + 450;
+          saveNegativeAndNext();
+        }
+      },
+      { passive: false }
+    );
+
+    imgBox.addEventListener("touchcancel", () => {
+      swipeTouchStartX = null;
+      swipeTouchStartY = null;
+    });
+  }
+
   // ---- Frame Click Handler ----
   frameImg.addEventListener("click", (e) => {
     if (!currentTaskId) return;
+    if (Date.now() < ignoreImgClickUntil) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
 
     showClickRing(e.clientX, e.clientY);
 
@@ -397,7 +450,7 @@
       }
 
       if (response.ok && result.ok) {
-        setLabelStatus(`🚫 Negativ gespeichert (leeres Label): Frame ${currentFrameId}`);
+        setLabelStatus(`Kein Ball gespeichert (leeres Label): Frame ${currentFrameId}`);
         setTimeout(() => nextFrame(), 250);
       } else {
         const err =
