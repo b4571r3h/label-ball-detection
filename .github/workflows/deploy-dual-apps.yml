@@ -32,6 +32,8 @@ jobs:
         context: ./ball-web-labeler-subpath
         file: ./ball-web-labeler-subpath/Dockerfile
         push: true
+        build-args: |
+          GIT_SHA=${{ github.sha }}
         tags: ghcr.io/${{ github.repository_owner }}/label-ball-detection:latest
 
     - name: Build and push Ball Analyzer
@@ -59,7 +61,8 @@ jobs:
         script: |
           cd /root/tt-apps
           git pull origin main
-          docker compose -f compose.ionos.yaml pull
+          # Nur Images mit Registry ziehen (ball-analyzer:fixed bleibt lokal)
+          docker compose -f compose.ionos.yaml pull ball-labeler ball-admin caddy
           docker compose -f compose.ionos.yaml down
-          docker compose -f compose.ionos.yaml up -d
+          docker compose -f compose.ionos.yaml up -d --force-recreate
           docker system prune -f

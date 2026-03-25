@@ -4,6 +4,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libgl1 l
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
+# Jeder Commit invalidiert nachfolgende Schichten (verhindert veraltetes static/main.js im Cache)
+ARG GIT_SHA=unknown
+RUN echo "$GIT_SHA" >/tmp/.labeler_git_sha
 COPY . /app
 RUN mkdir -p ${LABEL_DATA_DIR}
 EXPOSE 8000
