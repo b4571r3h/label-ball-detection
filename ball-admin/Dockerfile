@@ -5,12 +5,11 @@ ENV LABEL_DATA_DIR=/data/labels ANALYZER_DATA_DIR=/data/analyzer APP_ROOT_PATH="
 
 WORKDIR /app
 
-# Python-Dependencies
-COPY ball-admin/requirements.txt /app/requirements.txt
+# Build-Kontext ist ./ball-admin (wie in GitHub Actions) — Pfade relativ dazu
+COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# App-Code
-COPY ball-admin/ /app
+COPY . /app
 
 # Datenverzeichnisse erstellen
 RUN mkdir -p /data/labels /data/analyzer
