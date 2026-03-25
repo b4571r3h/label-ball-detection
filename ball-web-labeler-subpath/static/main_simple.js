@@ -61,6 +61,7 @@
   const labelCard = document.getElementById("labelCard");
   const taskIdSpan = document.getElementById("taskId");
   const frameCountSpan = document.getElementById("frameCount");
+  const imgBox = document.getElementById("imgBox");
   const frameImg = document.getElementById("frameImg");
   const crosshair = document.getElementById("crosshair");
   const boxSizeInput = document.getElementById("boxSize");
@@ -126,14 +127,40 @@
   // ---- Frame Click Handler ----
   frameImg.addEventListener("click", (e) => {
     if (!currentTaskId) return;
-    
+
+    showClickRing(e.clientX, e.clientY);
+
     const rect = frameImg.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    
-    // Ball-Labeling: Speichere Ball-Position
+
     saveBallLabel(x, y);
   });
+
+  function hideClickRing() {
+    if (!crosshair) return;
+    crosshair.classList.remove("ring-flash");
+    crosshair.style.display = "none";
+  }
+
+  /** Grüner Kreis am Klick, Durchmesser orientiert an „Box (px)“. */
+  function showClickRing(clientX, clientY) {
+    if (!crosshair || !imgBox) return;
+    const br = imgBox.getBoundingClientRect();
+    const left = clientX - br.left + imgBox.scrollLeft;
+    const top = clientY - br.top + imgBox.scrollTop;
+    const raw = parseFloat(boxSizeInput.value);
+    const dia = Math.max(14, Math.min(120, Number.isFinite(raw) ? raw : 24));
+
+    crosshair.style.width = `${dia}px`;
+    crosshair.style.height = `${dia}px`;
+    crosshair.style.left = `${left}px`;
+    crosshair.style.top = `${top}px`;
+    crosshair.style.display = "block";
+    crosshair.classList.remove("ring-flash");
+    void crosshair.offsetWidth;
+    crosshair.classList.add("ring-flash");
+  }
 
   // ---- Functions ----
   async function handleUpload() {
@@ -266,6 +293,8 @@
     currentFrameId = frameId;
     const filename = frames[frameId - 1];
     if (!filename) return;
+
+    hideClickRing();
 
     frameImg.src = API(
       `/api/task/${currentTaskId}/frame/${encodeURIComponent(filename)}`
