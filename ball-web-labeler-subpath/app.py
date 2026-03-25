@@ -13,7 +13,8 @@ Features
 - /api/task/{id}/label: Klick speichern (YOLO .txt)
 - /api/task/{id}/label/empty: Negativ-Frame (leere .txt)
 - /api/task/{id}/label-count: Anzahl Frames mit Label-Datei
-- /api/stats/labeled-total: Summe gelabelter Frames über alle Tasks
+- /api/stats/labeled-total: Summe gelabelter Frames (Labeler-Tasks + optional IMPORT_YOLO_BALL_DIR)
+- /api/stats/import-yolo: Status des importierten YOLO-Splits (Train/Val)
 - /api/task/{id}/export: ZIP flach (images/, labels/)
 - /api/task/{id}/export-yolo-split: ZIP für Training (images/train|val, labels/train|val)
 - /api/health:          Healthcheck
@@ -21,6 +22,7 @@ Features
 Umgebung:
 - LABEL_VIDEO_RETENTION_DAYS (Standard 5): Originalvideo video.* löschen wenn älter (0 = aus)
 - LABEL_VIDEO_CLEANUP_INTERVAL_SEC (Standard 3600): Prüfintervall in Sekunden
+- IMPORT_YOLO_BALL_DIR: optionaler Pfad zu einem YOLO-Root (images/train|val, labels/train|val) für Zähler + Training
 
 Subpfad:
 - Per Umgebungsvariable APP_ROOT_PATH (z. B. "/ball-detection")
@@ -62,7 +64,15 @@ STATIC_DIR = BASE_DIR / "static"
 DATA_DIR = Path(os.getenv("LABEL_DATA_DIR", BASE_DIR / "data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+_raw_import = os.getenv("IMPORT_YOLO_BALL_DIR", "").strip()
+IMPORT_YOLO_BALL_DIR: Optional[Path] = (
+    Path(_raw_import).resolve() if _raw_import else None
+)
+
 APP_ROOT_PATH = os.getenv("APP_ROOT_PATH", "").rstrip("/")  # z. B. "/ball-detection"
+
+# YOLO-Split-Import (images/train|val + passende labels/train|val)
+IMPORT_YOLO_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 # Originalvideos löschen, wenn älter als N Tage (mtime). 0 = deaktiviert.
 LABEL_VIDEO_RETENTION_DAYS = int(os.getenv("LABEL_VIDEO_RETENTION_DAYS", "5"))
@@ -427,6 +437,26 @@ def count_labeled_frames(task_id: str) -> tuple[int, int]:
     return labeled, len(frame_stems)
 
 
+def count_yolo_split_import(root: Optional[Path]) -> int:
+    """Zählt Bilder in images/{train,val} mit passender .txt in labels/{train,val}."""
+    if root is None or not root.is_dir():
+        return 0
+    n = 0
+    for split in ("train", "val"):
+        idir = root / "images" / split
+        ldir = root / "labels" / split
+        if not idir.is_dir() or not ldir.is_dir():
+            continue
+        for img in idir.iterdir():
+            if not img.is_file():
+                continue
+            if img.suffix.lower() not in IMPORT_YOLO_IMG_EXT:
+                continue
+            if (ldir / f"{img.stem}.txt").exists():
+                n += 1
+    return n
+
+
 @core.get("/api/task/{task_id:path}/label-count")
 def api_task_label_count(task_id: str):
     labeled, total = count_labeled_frames(task_id)
@@ -435,20 +465,36 @@ def api_task_label_count(task_id: str):
 
 @core.get("/api/stats/labeled-total")
 def api_stats_labeled_total():
-    """Summe aller Frames mit passender labels/*.txt über alle Tasks."""
-    if not DATA_DIR.is_dir():
-        return {"labeled": 0}
-    total = 0
-    for day_dir in sorted(DATA_DIR.iterdir()):
-        if not day_dir.is_dir():
-            continue
-        for task_sub in day_dir.iterdir():
-            if not task_sub.is_dir():
+    """Summe gelabelter Frames: Labeler-Tasks + optional IMPORT_YOLO_BALL_DIR."""
+    total_labeler = 0
+    if DATA_DIR.is_dir():
+        for day_dir in sorted(DATA_DIR.iterdir()):
+            if not day_dir.is_dir():
                 continue
-            rel = f"{day_dir.name}/{task_sub.name}"
-            n, _ = count_labeled_frames(rel)
-            total += n
-    return {"labeled": total}
+            for task_sub in day_dir.iterdir():
+                if not task_sub.is_dir():
+                    continue
+                rel = f"{day_dir.name}/{task_sub.name}"
+                n, _ = count_labeled_frames(rel)
+                total_labeler += n
+    total_import = count_yolo_split_import(IMPORT_YOLO_BALL_DIR)
+    return {
+        "labeled": total_labeler + total_import,
+        "labeled_labeler": total_labeler,
+        "labeled_import": total_import,
+    }
+
+
+@core.get("/api/stats/import-yolo")
+def api_stats_import_yolo():
+    """Ob und wie viele Paare im IMPORT_YOLO_BALL_DIR liegen."""
+    root = IMPORT_YOLO_BALL_DIR
+    paired = count_yolo_split_import(root)
+    return {
+        "enabled": bool(root and root.is_dir()),
+        "path": str(root) if root else "",
+        "paired": paired,
+    }
 
 
 @core.get("/api/task/{task_id:path}/frame/{filename}")

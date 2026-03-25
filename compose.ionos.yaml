@@ -10,8 +10,11 @@ services:
       - APP_ROOT_PATH=/ball-detection
       - LABEL_VIDEO_RETENTION_DAYS=5
       - LABEL_VIDEO_CLEANUP_INTERVAL_SEC=3600
+      # YOLO-Daten (images/train|val, labels/train|val) — auf dem Host nach ./ball-yolo-import/ball_det/ legen (z. B. per rsync vom Mac)
+      - IMPORT_YOLO_BALL_DIR=/data/yolo-import
     volumes:
       - ./ball-web-labeler-subpath/data:/data/labels
+      - ./ball-yolo-import/ball_det:/data/yolo-import:ro
     restart: unless-stopped
 
   # Ball Analyzer (neue App)
