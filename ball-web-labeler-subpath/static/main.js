@@ -132,6 +132,7 @@
   const crosshair = document.getElementById("crosshair");
   const boxSizeInput = document.getElementById("boxSize");
   const exportBtn = document.getElementById("exportBtn");
+  const exportYoloSplitBtn = document.getElementById("exportYoloSplitBtn");
   const prevBtn = document.getElementById("prevBtn");
   const negativeBtn = document.getElementById("negativeBtn");
   const nextBtn = document.getElementById("nextBtn");
@@ -194,6 +195,7 @@
   if (negativeBtn) negativeBtn.addEventListener("click", saveNegativeAndNext);
   nextBtn.addEventListener("click", nextFrame);
   exportBtn.addEventListener("click", exportZip);
+  if (exportYoloSplitBtn) exportYoloSplitBtn.addEventListener("click", exportYoloSplitZip);
 
   if (btnLabelFullscreen) {
     btnLabelFullscreen.addEventListener("click", () => {
@@ -607,6 +609,43 @@
     } catch (error) {
       setStatus(`❌ Export Fehler: ${error.message}`);
     } finally {
+      exportBtn.disabled = false;
+    }
+  }
+
+  async function exportYoloSplitZip() {
+    if (!currentTaskId) return;
+
+    setStatus("Exportiere YOLO Train/Val …");
+    if (exportYoloSplitBtn) exportYoloSplitBtn.disabled = true;
+    exportBtn.disabled = true;
+
+    try {
+      const q = new URLSearchParams({ val_fraction: "0.2", seed: "42" });
+      const response = await fetch(
+        API(`/api/task/${currentTaskId}/export-yolo-split?${q}`)
+      );
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `spinvo-yolo-${String(currentTaskId).replace(/\//g, "_")}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setStatus("✅ YOLO Train/Val-ZIP geladen (images/train|val, labels/train|val).");
+      } else {
+        setStatus(
+          `❌ YOLO-Export (${response.status}): ${await errorTextFromResponse(response)}`
+        );
+      }
+    } catch (error) {
+      setStatus(`❌ YOLO-Export: ${error.message}`);
+    } finally {
+      if (exportYoloSplitBtn) exportYoloSplitBtn.disabled = false;
       exportBtn.disabled = false;
     }
   }

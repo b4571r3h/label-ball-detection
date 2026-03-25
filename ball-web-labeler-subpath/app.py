@@ -14,7 +14,8 @@ Features
 - /api/task/{id}/label/empty: Negativ-Frame (leere .txt)
 - /api/task/{id}/label-count: Anzahl Frames mit Label-Datei
 - /api/stats/labeled-total: Summe gelabelter Frames über alle Tasks
-- /api/task/{id}/export: ZIP mit YOLO-Struktur erzeugen
+- /api/task/{id}/export: ZIP flach (images/, labels/)
+- /api/task/{id}/export-yolo-split: ZIP für Training (images/train|val, labels/train|val)
 - /api/health:          Healthcheck
 
 Umgebung:
@@ -39,13 +40,14 @@ import time
 import shutil
 import zipfile
 import tempfile
+import random
 import asyncio
 import datetime as dt
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -534,6 +536,74 @@ def api_task_export(task_id: str):
             "path: .\n"
             "train: images\n"
             "val: images\n"
+            "nc: 1\n"
+            "names: ['ball']\n"
+        )
+        zf.writestr("dataset.yaml", dataset_yaml)
+    finally:
+        zf.close()
+
+    return FileResponse(
+        path=str(zip_path),
+        filename=zip_path.name,
+        media_type="application/zip",
+    )
+
+
+@core.get("/api/task/{task_id:path}/export-yolo-split")
+def api_task_export_yolo_split(
+    task_id: str,
+    val_fraction: float = Query(0.2, ge=0.05, le=0.5, description="Anteil Validierung"),
+    seed: int = Query(42, description="Zufalls-Seed für reproduzierbaren Split"),
+):
+    """
+    ZIP für YOLOv8 / SpinEvo: nur Bilder **mit** passender .txt.
+    Struktur: images/train, images/val, labels/train, labels/val + dataset.yaml
+    """
+    td = (DATA_DIR / task_id).resolve()
+    if not td.is_dir():
+        raise HTTPException(404, "Task nicht gefunden")
+
+    pairs: list[tuple[Path, Path]] = []
+    for f in sorted((td / "frames").glob("*.jpg")):
+        lab = (td / "labels" / (f.stem + ".txt")).resolve()
+        if lab.exists():
+            pairs.append((f, lab))
+
+    if not pairs:
+        raise HTTPException(
+            400,
+            "Keine Paare Bild+Label: Es werden nur Frames exportiert, die bereits eine .txt haben.",
+        )
+
+    rng = random.Random(seed)
+    rng.shuffle(pairs)
+    n = len(pairs)
+
+    if n == 1:
+        train_pairs = list(pairs)
+        val_pairs = list(pairs)
+    else:
+        n_val = max(1, min(n - 1, int(round(n * val_fraction))))
+        val_pairs = pairs[:n_val]
+        train_pairs = pairs[n_val:]
+
+    tmp = Path(tempfile.mkdtemp(prefix="export_yolo_"))
+    zip_path = tmp / f"spinvo-yolo-{slugify(task_id, 'task')}.zip"
+    zf = zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED)
+    try:
+        for img_p, lab_p in train_pairs:
+            zf.write(img_p, arcname=f"images/train/{img_p.name}")
+            zf.write(lab_p, arcname=f"labels/train/{lab_p.name}")
+        for img_p, lab_p in val_pairs:
+            zf.write(img_p, arcname=f"images/val/{img_p.name}")
+            zf.write(lab_p, arcname=f"labels/val/{lab_p.name}")
+
+        dataset_yaml = (
+            "# Entpacken, dann z. B. SPINEVO_BALL_DATA_DIR auf diesen Ordner setzen.\n"
+            "path: .\n"
+            "train: images/train\n"
+            "val: images/val\n"
             "nc: 1\n"
             "names: ['ball']\n"
         )

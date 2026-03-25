@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Ball Detection</title>
-  <script defer src="static/main.js?v=spinevo-fs"></script>
+  <script defer src="static/main.js?v=yolo-split-export"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -141,7 +141,8 @@
         <div class="toolbar">
           <label>Box (px): <input type="number" id="boxSize" value="24" min="6" max="64" step="2" style="width:90px;"></label>
           <button class="btn" type="button" id="btnLabelFullscreen">Vollbild</button>
-          <button class="btn" id="exportBtn">Export ZIP</button>
+          <button class="btn" id="exportBtn" type="button" title="Alle Frames + alle Labels (flach)">Export ZIP (flach)</button>
+          <button class="btn" id="exportYoloSplitBtn" type="button" title="Nur gelabelte Frames, YOLO train/val für SpinEvo">Export YOLO (Train/Val)</button>
         </div>
       </div>
 
