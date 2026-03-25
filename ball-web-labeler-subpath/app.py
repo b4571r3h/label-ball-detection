@@ -15,14 +15,19 @@ Features
 - /api/task/{id}/label-count: Anzahl Frames mit Label-Datei
 - /api/stats/labeled-total: Summe gelabelter Frames (Labeler-Tasks + optional IMPORT_YOLO_BALL_DIR)
 - /api/stats/import-yolo: Status des importierten YOLO-Splits (Train/Val)
+- /api/export/import-yolo-zip: ZIP des Import-Ordners (für lokales Training)
 - /api/task/{id}/export: ZIP flach (images/, labels/)
 - /api/task/{id}/export-yolo-split: ZIP für Training (images/train|val, labels/train|val)
+- /api/export/yolo-dataset-full: Ein ZIP über alle Labeler-Tasks (globaler oder pro-Task-Split)
+- /api/stats/labeled-export: Metriken für Voll-Export (Frames, Tasks)
 - /api/health:          Healthcheck
 
 Umgebung:
 - LABEL_VIDEO_RETENTION_DAYS (Standard 5): Originalvideo video.* löschen wenn älter (0 = aus)
 - LABEL_VIDEO_CLEANUP_INTERVAL_SEC (Standard 3600): Prüfintervall in Sekunden
 - IMPORT_YOLO_BALL_DIR: optionaler Pfad zu einem YOLO-Root (images/train|val, labels/train|val) für Zähler + Training
+- BALL_DETECTION_EXPORT_API_KEY: optional; wenn gesetzt, verlangen /api/export/yolo-dataset-full und
+  /api/stats/labeled-export den Header Authorization: Bearer <dieselber Wert>
 
 Subpfad:
 - Per Umgebungsvariable APP_ROOT_PATH (z. B. "/ball-detection")
@@ -44,13 +49,17 @@ import zipfile
 import tempfile
 import random
 import asyncio
+import hashlib
 import datetime as dt
+from collections import defaultdict
 from contextlib import asynccontextmanager
+from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Query, Depends
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from PIL import Image
@@ -71,8 +80,38 @@ IMPORT_YOLO_BALL_DIR: Optional[Path] = (
 
 APP_ROOT_PATH = os.getenv("APP_ROOT_PATH", "").rstrip("/")  # z. B. "/ball-detection"
 
+BALL_DETECTION_EXPORT_API_KEY = os.getenv("BALL_DETECTION_EXPORT_API_KEY", "").strip()
+
 # YOLO-Split-Import (images/train|val + passende labels/train|val)
 IMPORT_YOLO_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+export_bearer = HTTPBearer(auto_error=False)
+
+
+def require_export_bearer(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(export_bearer),
+) -> None:
+    """Schützt Voll-Export + Export-Stats, wenn BALL_DETECTION_EXPORT_API_KEY gesetzt ist."""
+    if not BALL_DETECTION_EXPORT_API_KEY:
+        return
+    token = (creds.credentials if creds else "") or ""
+    token = token.strip()
+    if token != BALL_DETECTION_EXPORT_API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Authorization: Bearer <Token> erforderlich (gleicher Wert wie "
+                "Umgebungsvariable BALL_DETECTION_EXPORT_API_KEY)."
+            ),
+        )
+
+
+class YoloFullExportStrategy(str, Enum):
+    """Split-Strategie für GET /api/export/yolo-dataset-full."""
+
+    global_split = "global_split"
+    per_task_split = "per_task_split"
+
 
 # Originalvideos löschen, wenn älter als N Tage (mtime). 0 = deaktiviert.
 LABEL_VIDEO_RETENTION_DAYS = int(os.getenv("LABEL_VIDEO_RETENTION_DAYS", "5"))
@@ -321,9 +360,29 @@ class EmptyLabelIn(BaseModel):
 # FastAPI Apps (Core + Wrapper für Subpfad)
 # ---------------------------------------------------------------------
 
-_core_kw = {"title": "TT Ball Labeler"}
+_core_kw = {
+    "title": "SpinEvo Ball Detection Labeler API",
+    "description": (
+        "**YOLOv8 Voll-Export:** `GET /api/export/yolo-dataset-full` liefert ein ZIP mit "
+        "`dataset.yaml`, `images/train`, `images/val`, `labels/train`, `labels/val`. "
+        "Labels: eine Zeile pro Box `0 cx cy w h` (normalisiert); Negativ-Beispiele = leere `.txt`. "
+        "**Auth (optional):** Wenn die Umgebungsvariable `BALL_DETECTION_EXPORT_API_KEY` gesetzt ist, "
+        "Header `Authorization: Bearer <gleicher Wert>` für diesen Endpunkt und "
+        "`GET /api/stats/labeled-export` senden. "
+        "Siehe README-Abschnitt „Training / YOLO Export“."
+    ),
+}
 if not APP_ROOT_PATH:
     _core_kw["lifespan"] = video_retention_lifespan
+
+_core_kw["openapi_tags"] = [
+    {
+        "name": "export",
+        "description": (
+            "YOLOv8-Dataset-Export. Optional Bearer-Auth, wenn `BALL_DETECTION_EXPORT_API_KEY` gesetzt ist."
+        ),
+    },
+]
 
 core = FastAPI(**_core_kw)
 core.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -496,6 +555,126 @@ def count_yolo_split_import(root: Optional[Path]) -> int:
     return n
 
 
+def iter_labeler_yolo_pairs() -> list[tuple[str, Path, Path]]:
+    """
+    Alle gelabelten Paare unter DATA_DIR: (task_id, frame.jpg, labels/stem.txt).
+    Negativ-Beispiele: leere .txt-Datei zählt, sobald die Datei existiert (0 Bytes erlaubt).
+    """
+    out: list[tuple[str, Path, Path]] = []
+    if not DATA_DIR.is_dir():
+        return out
+    for day in sorted(DATA_DIR.iterdir()):
+        if not day.is_dir():
+            continue
+        for t in sorted(day.iterdir()):
+            if not t.is_dir():
+                continue
+            rel = str(t.relative_to(DATA_DIR))
+            frames_dir = t / "frames"
+            labels_dir = t / "labels"
+            if not frames_dir.is_dir() or not labels_dir.is_dir():
+                continue
+            for img in sorted(frames_dir.glob("*.jpg")):
+                lab = (labels_dir / f"{img.stem}.txt").resolve()
+                if not lab.is_file():
+                    continue
+                try:
+                    img.resolve().relative_to(DATA_DIR.resolve())
+                    lab.relative_to(DATA_DIR.resolve())
+                except ValueError:
+                    continue
+                out.append((rel, img.resolve(), lab))
+    return out
+
+
+def export_unique_stem(task_id: str, frame_filename: str) -> str:
+    """Eindeutiger Basisname (ohne Extension) für Bild + Label im ZIP über alle Tasks."""
+    pfx = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:12]
+    stem = Path(frame_filename).stem
+    return f"{pfx}_{stem}"
+
+
+def _split_pairs_train_val(
+    pairs: list[tuple[str, Path, Path]],
+    val_fraction: float,
+    seed: int,
+) -> tuple[list[tuple[str, Path, Path]], list[tuple[str, Path, Path]]]:
+    """Ein Pool; reproduzierbarer Train/Val-Split (gleiche Logik wie pro-Task-Export)."""
+    rng = random.Random(seed)
+    items = list(pairs)
+    rng.shuffle(items)
+    n = len(items)
+    if n == 0:
+        return [], []
+    if n == 1:
+        return items, list(items)
+    n_val = max(1, min(n - 1, int(round(n * val_fraction))))
+    val_items = items[:n_val]
+    train_items = items[n_val:]
+    return train_items, val_items
+
+
+def _derived_seed(base_seed: int, salt: str) -> int:
+    h = hashlib.sha256(f"{base_seed}:{salt}".encode("utf-8")).hexdigest()
+    return int(h[:8], 16)
+
+
+def train_val_for_full_export(
+    pairs: list[tuple[str, Path, Path]],
+    val_fraction: float,
+    seed: int,
+    strategy: YoloFullExportStrategy,
+) -> tuple[list[tuple[str, Path, Path]], list[tuple[str, Path, Path]]]:
+    if strategy == YoloFullExportStrategy.global_split:
+        return _split_pairs_train_val(pairs, val_fraction, seed)
+    by_task: dict[str, list[tuple[str, Path, Path]]] = defaultdict(list)
+    for row in pairs:
+        by_task[row[0]].append(row)
+    train_all: list[tuple[str, Path, Path]] = []
+    val_all: list[tuple[str, Path, Path]] = []
+    for tid in sorted(by_task.keys()):
+        chunk = by_task[tid]
+        tr, va = _split_pairs_train_val(chunk, val_fraction, _derived_seed(seed, tid))
+        train_all.extend(tr)
+        val_all.extend(va)
+    return train_all, val_all
+
+
+def build_yolo_full_zip_file(
+    train_pairs: list[tuple[str, Path, Path]],
+    val_pairs: list[tuple[str, Path, Path]],
+    strategy: YoloFullExportStrategy,
+) -> Path:
+    """ZIP auf Disk (Tempdir); enthält dataset.yaml + images/{train,val} + labels/{train,val}. Bilder: .jpg."""
+    tmp = Path(tempfile.mkdtemp(prefix="yolo_full_export_"))
+    zip_path = tmp / "spinvo-yolo-dataset-full.zip"
+    zf = zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED)
+    try:
+        for split_name, plist in (("train", train_pairs), ("val", val_pairs)):
+            for task_id, img_p, lab_p in plist:
+                stem = export_unique_stem(task_id, img_p.name)
+                arc_img = f"images/{split_name}/{stem}.jpg"
+                arc_lab = f"labels/{split_name}/{stem}.txt"
+                zf.write(img_p, arcname=arc_img)
+                zf.write(lab_p, arcname=arc_lab)
+
+        comment = (
+            f"# SpinEvo Ball-Detection Voll-Export; strategy={strategy.value}; "
+            "Negativ: leere .txt (0 Bytes) pro Bild.\n"
+        )
+        dataset_yaml = comment + (
+            "path: .\n"
+            "train: images/train\n"
+            "val: images/val\n"
+            "nc: 1\n"
+            "names: ['ball']\n"
+        )
+        zf.writestr("dataset.yaml", dataset_yaml)
+    finally:
+        zf.close()
+    return zip_path
+
+
 @core.get("/api/task/{task_id:path}/label-count")
 def api_task_label_count(task_id: str):
     labeled, total = count_labeled_frames(task_id)
@@ -534,6 +713,168 @@ def api_stats_import_yolo():
         "path": str(root) if root else "",
         "paired": paired,
     }
+
+
+def _zip_import_yolo_root(root: Path) -> Path:
+    """Baut ein ZIP mit images/train|val und labels/train|val relativ zu root."""
+    root = root.resolve()
+    if not root.is_dir():
+        raise HTTPException(503, "Import-Verzeichnis existiert nicht.")
+
+    tmp = Path(tempfile.mkdtemp(prefix="import_yolo_zip_"))
+    zip_path = tmp / "spinvo-yolo-import.zip"
+    subdirs = [
+        root / "images" / "train",
+        root / "images" / "val",
+        root / "labels" / "train",
+        root / "labels" / "val",
+    ]
+    file_count = 0
+    zf = zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED)
+    try:
+        for d in subdirs:
+            if not d.is_dir():
+                continue
+            try:
+                rel_parent = d.relative_to(root)
+            except ValueError:
+                continue
+            for f in sorted(d.iterdir()):
+                if not f.is_file():
+                    continue
+                try:
+                    f.resolve().relative_to(root)
+                except ValueError:
+                    continue
+                arc = rel_parent / f.name
+                zf.write(f, arcname=str(arc).replace("\\", "/"))
+                file_count += 1
+
+        ds = root / "dataset.yaml"
+        if ds.is_file():
+            zf.write(ds, arcname="dataset.yaml")
+        elif file_count > 0:
+            zf.writestr(
+                "dataset.yaml",
+                "path: .\n"
+                "train: images/train\n"
+                "val: images/val\n"
+                "nc: 1\n"
+                "names: ['ball']\n",
+            )
+    finally:
+        zf.close()
+
+    if file_count == 0:
+        try:
+            zip_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(
+            400,
+            "Im Import-Ordner liegen keine Dateien unter images/{train,val} oder labels/{train,val}.",
+        )
+
+    return zip_path
+
+
+@core.get("/api/export/import-yolo-zip")
+def api_export_import_yolo_zip():
+    """ZIP-Download: YOLO-Struktur aus IMPORT_YOLO_BALL_DIR (für lokales YOLOv8-Training)."""
+    if IMPORT_YOLO_BALL_DIR is None or not str(IMPORT_YOLO_BALL_DIR).strip():
+        raise HTTPException(
+            503,
+            "IMPORT_YOLO_BALL_DIR ist nicht gesetzt. Auf dem Server in compose.env konfigurieren.",
+        )
+    zip_path = _zip_import_yolo_root(IMPORT_YOLO_BALL_DIR)
+    return FileResponse(
+        path=str(zip_path),
+        filename="spinvo-yolo-import.zip",
+        media_type="application/zip",
+    )
+
+
+@core.get(
+    "/api/stats/labeled-export",
+    tags=["export"],
+    summary="Metriken für YOLO-Voll-Export",
+    dependencies=[Depends(require_export_bearer)],
+)
+def api_stats_labeled_export():
+    """
+    Anzahl gelabelter Frames (Labeler-Datenbank) und beteiligte Tasks.
+    `last_export_build`: reserviert für zukünftiges serverseitiges Caching (derzeit immer null).
+    """
+    pairs = iter_labeler_yolo_pairs()
+    tasks = {p[0] for p in pairs}
+    return {
+        "frames_total": len(pairs),
+        "tasks_included": len(tasks),
+        "split_strategies": ["global_split", "per_task_split"],
+        "default_strategy": YoloFullExportStrategy.global_split.value,
+        "last_export_build": None,
+    }
+
+
+@core.get(
+    "/api/export/yolo-dataset-full",
+    tags=["export"],
+    summary="YOLOv8-Dataset-ZIP über alle Labeler-Tasks",
+    response_class=FileResponse,
+    responses={
+        422: {
+            "description": "Keine exportierbaren Bild+Label-Paare",
+            "content": {
+                "application/json": {"example": {"detail": "Keine gelabelten Frames im Datenverzeichnis."}}
+            },
+        },
+    },
+    dependencies=[Depends(require_export_bearer)],
+)
+def api_export_yolo_dataset_full(
+    val_fraction: float = Query(
+        0.2,
+        ge=0.05,
+        le=0.5,
+        description="Anteil Validierung (global oder pro Task, je nach strategy).",
+    ),
+    seed: int = Query(42, description="Zufalls-Seed für reproduzierbaren Split."),
+    strategy: YoloFullExportStrategy = Query(
+        YoloFullExportStrategy.global_split,
+        description=(
+            "`global_split`: alle Paare aus allen Tasks werden gemischt, dann ein Train/Val-Split "
+            "(empfohlen für ein einzelnes Gesamtmodell). "
+            "`per_task_split`: je Task ein eigener Split nach demselben val_fraction/Seed-Ableitung; "
+            "Ergebnis-Trainings- und Validierungsmengen sind die Vereinigungen — ohne Mischen "
+            "zwischen Tasks innerhalb eines Splits."
+        ),
+    ),
+):
+    """
+    Ein ZIP für `yolo detect train data=.../dataset.yaml`.
+
+    **Inhalt:** `dataset.yaml` (path `.`, train/val relativ), `images/train|val/*.jpg`,
+    `labels/train|val/*.txt` (gleicher Basisname wie Bild). Dateinamen sind über alle Tasks eindeutig
+    (Präfix = SHA256-Fragment der `task_id`).
+
+    **Hinweis:** Sehr große Datenmengen werden synchron als ZIP auf dem Server gebaut (Temp-Datei);
+    bei Timeout-Problemen später ggf. asynchronen Job einplanen.
+    """
+    pairs = iter_labeler_yolo_pairs()
+    if not pairs:
+        raise HTTPException(
+            status_code=422,
+            detail="Keine gelabelten Frames im Datenverzeichnis (kein Bild mit passender labels/*.txt).",
+        )
+    train_pairs, val_pairs = train_val_for_full_export(
+        pairs, val_fraction=val_fraction, seed=seed, strategy=strategy
+    )
+    zip_path = build_yolo_full_zip_file(train_pairs, val_pairs, strategy)
+    return FileResponse(
+        path=str(zip_path),
+        filename="spinvo-yolo-dataset-full.zip",
+        media_type="application/zip",
+    )
 
 
 @core.get("/api/task/{task_id:path}/frame/{filename}")

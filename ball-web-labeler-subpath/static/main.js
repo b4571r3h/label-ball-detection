@@ -137,6 +137,7 @@
   const uploadBtn = document.getElementById("btn-upload");
   const dropZone  = document.getElementById("dropZone");
   const statusDiv = document.getElementById("status");
+  const btnDownloadImportZip = document.getElementById("btnDownloadImportZip");
   
   const ytUrlInput = document.getElementById("yt-url");
   const fpsYtInput = document.getElementById("fps-yt");
@@ -215,6 +216,7 @@
   nextBtn.addEventListener("click", nextFrame);
   exportBtn.addEventListener("click", exportZip);
   if (exportYoloSplitBtn) exportYoloSplitBtn.addEventListener("click", exportYoloSplitZip);
+  if (btnDownloadImportZip) btnDownloadImportZip.addEventListener("click", downloadImportYoloZip);
 
   if (btnLabelFullscreen) {
     btnLabelFullscreen.addEventListener("click", () => {
@@ -666,6 +668,34 @@
     } finally {
       if (exportYoloSplitBtn) exportYoloSplitBtn.disabled = false;
       exportBtn.disabled = false;
+    }
+  }
+
+  async function downloadImportYoloZip() {
+    setStatus("Lade Import-YOLO-ZIP …");
+    if (btnDownloadImportZip) btnDownloadImportZip.disabled = true;
+    try {
+      const response = await fetch(API("/api/export/import-yolo-zip"));
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "spinvo-yolo-import.zip";
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setStatus("✅ Import-ZIP geladen (images/train|val, labels/train|val).");
+      } else {
+        setStatus(
+          `❌ Import-ZIP (${response.status}): ${await errorTextFromResponse(response)}`
+        );
+      }
+    } catch (error) {
+      setStatus(`❌ Import-ZIP: ${error.message}`);
+    } finally {
+      if (btnDownloadImportZip) btnDownloadImportZip.disabled = false;
     }
   }
 

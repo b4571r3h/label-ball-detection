@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Ball Detection</title>
-  <script defer src="static/main.js?v=yolo-split-export"></script>
+  <script defer src="static/main.js?v=import-yolo-zip"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -178,6 +178,12 @@
         </div>
       </div>
       <div class="muted" id="status" style="margin-top:8px;">Bereit.</div>
+      <div class="row" style="margin-top:12px; align-items:center;">
+        <button class="btn" type="button" id="btnDownloadImportZip" title="ZIP mit images/train|val + labels/train|val (Server-Import)">
+          Import-Dataset als ZIP
+        </button>
+        <span class="muted" style="font-size:13px;">Für lokales YOLOv8-Training (Ordner vom Server)</span>
+      </div>
     </div>
 
     <div class="card" id="labelCard" style="margin-top:16px; display:none;">
