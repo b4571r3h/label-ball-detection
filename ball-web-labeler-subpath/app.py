@@ -11,6 +11,7 @@ Features
 - /api/task/{id}/frames:Frames für Task auflisten
 - /api/task/{id}/frame/{name}: Bild ausliefern
 - /api/task/{id}/label: Klick speichern (YOLO .txt)
+- /api/task/{id}/label/empty: Negativ-Frame (leere .txt)
 - /api/task/{id}/export: ZIP mit YOLO-Struktur erzeugen
 - /api/health:          Healthcheck
 
@@ -198,6 +199,11 @@ class LabelIn(BaseModel):
     box: float     # Quadratische Box-Kantenlänge (Pixel)
 
 
+class EmptyLabelIn(BaseModel):
+    """Negativ-Beispiel: leere YOLO-Datei (keine Objekte im Bild)."""
+    filename: str
+
+
 # ---------------------------------------------------------------------
 # FastAPI Apps (Core + Wrapper für Subpfad)
 # ---------------------------------------------------------------------
@@ -378,6 +384,20 @@ def api_task_save_label(task_id: str, li: LabelIn):
     lab_path.write_text(txt, encoding="utf-8")
 
     return {"ok": True, "saved": lab_path.name}
+
+
+@core.post("/api/task/{task_id:path}/label/empty")
+def api_task_empty_label(task_id: str, body: EmptyLabelIn):
+    """Schreibt eine leere .txt (YOLO: Bild ohne erkennbaren Ball)."""
+    td = task_dir(task_id)
+    img = (td / "frames" / body.filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+
+    lab_path = (td / "labels" / (Path(body.filename).stem + ".txt")).resolve()
+    lab_path.write_text("", encoding="utf-8")
+
+    return {"ok": True, "saved": lab_path.name, "negative": True}
 
 
 # -------------------- Export ZIP (YOLO-Struktur) --------------------

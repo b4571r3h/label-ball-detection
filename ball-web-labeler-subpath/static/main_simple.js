@@ -67,7 +67,7 @@
   const boxSizeInput = document.getElementById("boxSize");
   const exportBtn = document.getElementById("exportBtn");
   const prevBtn = document.getElementById("prevBtn");
-  const skipBtn = document.getElementById("skipBtn");
+  const negativeBtn = document.getElementById("negativeBtn");
   const nextBtn = document.getElementById("nextBtn");
   const labelStatusDiv = document.getElementById("labelStatus");
 
@@ -109,7 +109,7 @@
 
   // ---- Navigation ----
   prevBtn.addEventListener("click", prevFrame);
-  skipBtn.addEventListener("click", skipFrame);
+  if (negativeBtn) negativeBtn.addEventListener("click", saveNegativeAndNext);
   nextBtn.addEventListener("click", nextFrame);
   exportBtn.addEventListener("click", exportZip);
 
@@ -120,7 +120,8 @@
     switch(e.key.toLowerCase()) {
       case 'a': prevFrame(); e.preventDefault(); break;
       case 'd': nextFrame(); e.preventDefault(); break;
-      case 's': skipFrame(); e.preventDefault(); break;
+      case 's': nextFrame(); e.preventDefault(); break;
+      case 'n': saveNegativeAndNext(); e.preventDefault(); break;
     }
   });
 
@@ -368,8 +369,48 @@
     }
   }
 
-  function skipFrame() {
-    nextFrame();
+  async function saveNegativeAndNext() {
+    if (!currentTaskId) return;
+
+    const filename = frames[currentFrameId - 1];
+    if (!filename) {
+      setLabelStatus("Kein Frame – bitte neu laden.");
+      return;
+    }
+
+    hideClickRing();
+
+    if (negativeBtn) negativeBtn.disabled = true;
+
+    try {
+      const response = await fetch(API(`/api/task/${currentTaskId}/label/empty`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename })
+      });
+
+      let result = {};
+      try {
+        result = await response.json();
+      } catch (_) {
+        /* ignore */
+      }
+
+      if (response.ok && result.ok) {
+        setLabelStatus(`🚫 Negativ gespeichert (leeres Label): Frame ${currentFrameId}`);
+        setTimeout(() => nextFrame(), 250);
+      } else {
+        const err =
+          result.detail ||
+          result.error ||
+          (typeof result === "string" ? result : JSON.stringify(result));
+        setLabelStatus(`❌ Negativ speichern fehlgeschlagen: ${err || response.status}`);
+      }
+    } catch (error) {
+      setLabelStatus(`❌ Negativ: ${error.message}`);
+    } finally {
+      if (negativeBtn) negativeBtn.disabled = false;
+    }
   }
 
   async function exportZip() {

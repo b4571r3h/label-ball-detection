@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TT Ball Labeler for TTAI</title>
-  <script defer src="static/main.js?v=click-ring"></script>
+  <script defer src="static/main.js?v=negative-label"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -147,10 +147,10 @@
       </div>
       <div class="row" style="margin-top:8px;">
         <button class="btn" id="prevBtn">◀ Zurück (A)</button>
-        <button class="btn" id="skipBtn">💾 Speichern/Skip (S)</button>
+        <button class="btn" id="negativeBtn" type="button">🚫 Kein Ball (N)</button>
         <button class="btn" id="nextBtn">Weiter (D) ▶</button>
         <div class="muted" id="click-instruction">
-          Ball-Labeling: Klick setzt Ball-Mitte & speichert automatisch
+          Klick = Ball speichern · <strong>N</strong> = Negativ (leeres Label) · <strong>D/S</strong> = nur weiter ohne zu speichern
         </div>
       </div>
       <div class="muted" id="labelStatus" style="margin-top:6px;">–</div>
