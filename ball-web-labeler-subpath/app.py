@@ -13,6 +13,7 @@ Features
 - /api/task/{id}/label: Klick speichern (YOLO .txt)
 - /api/task/{id}/label/empty: Negativ-Frame (leere .txt)
 - /api/task/{id}/label-count: Anzahl Frames mit Label-Datei
+- /api/stats/labeled-total: Summe gelabelter Frames über alle Tasks
 - /api/task/{id}/export: ZIP mit YOLO-Struktur erzeugen
 - /api/health:          Healthcheck
 
@@ -428,6 +429,24 @@ def count_labeled_frames(task_id: str) -> tuple[int, int]:
 def api_task_label_count(task_id: str):
     labeled, total = count_labeled_frames(task_id)
     return {"task_id": task_id, "labeled": labeled, "total_frames": total}
+
+
+@core.get("/api/stats/labeled-total")
+def api_stats_labeled_total():
+    """Summe aller Frames mit passender labels/*.txt über alle Tasks."""
+    if not DATA_DIR.is_dir():
+        return {"labeled": 0}
+    total = 0
+    for day_dir in sorted(DATA_DIR.iterdir()):
+        if not day_dir.is_dir():
+            continue
+        for task_sub in day_dir.iterdir():
+            if not task_sub.is_dir():
+                continue
+            rel = f"{day_dir.name}/{task_sub.name}"
+            n, _ = count_labeled_frames(rel)
+            total += n
+    return {"labeled": total}
 
 
 @core.get("/api/task/{task_id:path}/frame/{filename}")

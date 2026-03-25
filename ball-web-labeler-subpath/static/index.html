@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TT Ball Labeler for TTAI</title>
-  <script defer src="static/main.js?v=label-counter"></script>
+  <title>SpinEvo | Ball Detection</title>
+  <script defer src="static/main.js?v=spinevo-fs"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -14,6 +14,10 @@
     .btn { background:#1f2937; border:1px solid #374151; padding:14px 18px; border-radius:12px; color:#e5e7eb; cursor:pointer; font-size:16px; }
     .btn:hover { background:#111827; }
     .drop { border:2px dashed #374151; border-radius:12px; padding:18px; text-align:center; }
+    .page-title { font-size:1.5rem; font-weight:700; margin:0 0 6px 0; letter-spacing:-0.02em; }
+    .page-sub { margin:0 0 4px 0; font-size:1.05rem; }
+    .page-hint { margin:0; font-size:14px; }
+    #labelFullscreenRoot { margin-top:12px; }
     #imgBox { position:relative; display:inline-block; max-width:100%; touch-action: manipulation; }
     #frameImg { max-width:100%; border-radius:10px; display:block; }
     #crosshair {
@@ -34,30 +38,81 @@
     .toolbar input { height:44px; font-size:16px; }
     input[type="file"] { height:44px; }
     .muted { color: var(--muted); font-size:14px; }
+    .label-fs-bar {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .label-fs-bar .btn { padding: 12px 14px; font-size: 15px; }
+    #labelFullscreenRoot:fullscreen,
+    #labelFullscreenRoot:-webkit-full-screen {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 8px;
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
+      box-sizing: border-box;
+      background: #0b1220;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #labelFullscreenRoot:fullscreen #imgBox,
+    #labelFullscreenRoot:-webkit-full-screen #imgBox {
+      flex: 1 1 auto;
+      max-width: 100%;
+      max-height: calc(100vh - 100px);
+      max-height: calc(100dvh - 100px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #labelFullscreenRoot:fullscreen #frameImg,
+    #labelFullscreenRoot:-webkit-full-screen #frameImg {
+      max-width: 100%;
+      max-height: calc(100vh - 108px);
+      max-height: calc(100dvh - 108px);
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+    #labelFullscreenRoot:fullscreen .label-fs-bar,
+    #labelFullscreenRoot:-webkit-full-screen .label-fs-bar {
+      display: flex;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      margin-top: 0;
+      padding: 10px 8px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      background: rgba(15, 23, 42, 0.94);
+      border-top: 1px solid #1f2937;
+      z-index: 100;
+    }
+    #fsFrameInfo { font-size: 13px; margin-left: 4px; }
     @media (max-width: 640px) {
       .row { gap:10px; }
       .btn { width:100%; }
+      .toolbar .btn { width: auto; }
+      #labelFullscreenRoot:fullscreen .label-fs-bar .btn,
+      #labelFullscreenRoot:-webkit-full-screen .label-fs-bar .btn { width: auto; flex: 1 1 auto; min-width: 0; }
       #crosshair { width:28px; height:28px; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>🏓 TT Ball Labeler für TTAI <span class="muted">(YouTube & Upload)</span></h1>
-    
-    <!-- Ball Labeling Only -->
-    <div class="card" style="margin-bottom:16px;">
-      <div class="row" style="align-items:center; justify-content:center;">
-        <div style="margin-right:16px;">
-          <strong>🏓 Ball-Labeling:</strong>
-        </div>
-        <div class="muted">
-          Klicken Sie auf Bälle im Video um sie zu markieren
-        </div>
-      </div>
-    </div>
+    <h1 class="page-title">SpinEvo | Ball Detection</h1>
+    <p class="page-sub muted" id="pageSubLabeled">Bereits <span id="globalLabeledCount">–</span> Frames gelabelt</p>
+    <p class="page-hint muted">YouTube oder Video-Upload · Tipp auf den Ball setzt die Position</p>
 
-    <div class="card" id="ingestCard">
+    <div class="card" id="ingestCard" style="margin-top:20px;">
       <div class="row">
         <div class="drop" id="dropZone" style="flex:1; min-width:260px;">
           <div><strong>Drag & Drop</strong> Video hierher oder Datei wählen</div>
@@ -85,73 +140,49 @@
         </div>
         <div class="toolbar">
           <label>Box (px): <input type="number" id="boxSize" value="24" min="6" max="64" step="2" style="width:90px;"></label>
+          <button class="btn" type="button" id="btnLabelFullscreen">Vollbild</button>
           <button class="btn" id="exportBtn">Export ZIP</button>
         </div>
       </div>
 
-      <div id="imgBox" style="margin-top:12px; position: relative; display: inline-block;">
-        <img id="frameImg" src="" alt="frame" />
-        <div id="crosshair"></div>
-        <!-- Zoom-Lupe -->
-        <div id="zoom-magnifier" style="
-          position: absolute;
-          width: 120px;
-          height: 120px;
-          border: 2px solid #22c55e;
-          border-radius: 50%;
-          background: white;
-          display: none;
-          pointer-events: none;
-          z-index: 1000;
-          overflow: hidden;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        ">
-          <img id="zoom-img" src="" style="
+      <div id="labelFullscreenRoot">
+        <div id="imgBox" style="position: relative; display: inline-block;">
+          <img id="frameImg" src="" alt="frame" />
+          <div id="crosshair"></div>
+          <div id="zoom-magnifier" style="
             position: absolute;
+            width: 120px;
+            height: 120px;
+            border: 2px solid #22c55e;
+            border-radius: 50%;
+            background: white;
+            display: none;
             pointer-events: none;
-          " />
-          <!-- Fadenkreuz -->
-          <div style="
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 20px;
-            height: 20px;
-            margin: -10px 0 0 -10px;
-            pointer-events: none;
-            z-index: 1001;
+            z-index: 1000;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
           ">
-            <!-- Vertikale Linie -->
-            <div style="
-              position: absolute;
-              top: 0;
-              left: 50%;
-              width: 1px;
-              height: 20px;
-              background: #ef4444;
-              margin-left: -0.5px;
-              box-shadow: 0 0 2px rgba(0,0,0,0.5);
-            "></div>
-            <!-- Horizontale Linie -->
-            <div style="
-              position: absolute;
-              top: 50%;
-              left: 0;
-              width: 20px;
-              height: 1px;
-              background: #ef4444;
-              margin-top: -0.5px;
-              box-shadow: 0 0 2px rgba(0,0,0,0.5);
-            "></div>
+            <img id="zoom-img" src="" style="position: absolute; pointer-events: none;" />
+            <div style="position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; pointer-events: none; z-index: 1001;">
+              <div style="position: absolute; top: 0; left: 50%; width: 1px; height: 20px; background: #ef4444; margin-left: -0.5px;"></div>
+              <div style="position: absolute; top: 50%; left: 0; width: 20px; height: 1px; background: #ef4444; margin-top: -0.5px;"></div>
+            </div>
           </div>
+        </div>
+        <div id="labelFsBar" class="label-fs-bar">
+          <button class="btn" type="button" id="fsExitBtn">Vollbild beenden</button>
+          <button class="btn" type="button" id="fsPrevBtn" title="Zurück">◀</button>
+          <button class="btn" type="button" id="fsNegBtn">Kein Ball</button>
+          <button class="btn" type="button" id="fsNextBtn" title="Weiter">▶</button>
+          <span class="muted" id="fsFrameInfo"></span>
         </div>
       </div>
       <div class="row" style="margin-top:8px;">
         <button class="btn" id="prevBtn">◀ Zurück (A)</button>
-        <button class="btn" id="negativeBtn" type="button" title="Leeres YOLO-Label. Tastatur: N. Smartphone: über dem Bild nach links wischen.">Kein Ball</button>
+        <button class="btn" id="negativeBtn" type="button" title="Leeres YOLO-Label. Taste N. Smartphone: über dem Bild nach links wischen = Kein Ball zu sehen.">Kein Ball</button>
         <button class="btn" id="nextBtn">Weiter (D) ▶</button>
         <div class="muted" id="click-instruction">
-          Tipp = Ball · <strong>Kein Ball</strong>-Button oder <strong>N</strong> · Handy: über dem Bild <strong>nach links wischen</strong> · <strong>D/S</strong> = weiter ohne Speichern
+          Tipp = Ball · <strong>Kein Ball</strong> oder <strong>N</strong> · Handy: <strong>nach links wischen</strong> (= Kein Ball zu sehen) · <strong>D/S</strong> = weiter ohne Speichern
         </div>
       </div>
       <div class="muted" id="labelStatus" style="margin-top:6px;">–</div>

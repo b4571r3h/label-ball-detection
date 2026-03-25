@@ -1,4 +1,4 @@
-/* static/main_simple.js – Nur Ball-Labeling, kein Table-Labeling */
+/* SpinEvo Ball Detection – Labeler Frontend (Kopie main_simple) */
 
 (() => {
   // ---- Helper: Root-Pfad bestimmen ----
@@ -45,6 +45,72 @@
     return text || `HTTP ${response.status}`;
   }
 
+  async function refreshGlobalLabeledTotal() {
+    if (!globalLabeledCount) return;
+    try {
+      const r = await fetch(API("/api/stats/labeled-total"));
+      if (!r.ok) return;
+      const d = await r.json();
+      globalLabeledCount.textContent = String(
+        typeof d.labeled === "number" ? d.labeled : 0
+      );
+    } catch (_) {
+      globalLabeledCount.textContent = "–";
+    }
+  }
+
+  function getFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement;
+  }
+
+  function updateFsFrameInfo() {
+    if (!fsFrameInfo) return;
+    if (totalFrames > 0 && currentFrameId >= 1) {
+      fsFrameInfo.textContent = `Frame ${currentFrameId}/${totalFrames}`;
+    } else {
+      fsFrameInfo.textContent = "";
+    }
+  }
+
+  function onFullscreenChange() {
+    const on = labelFullscreenRoot && getFullscreenElement() === labelFullscreenRoot;
+    if (labelFsBar) labelFsBar.style.display = on ? "flex" : "none";
+    if (btnLabelFullscreen) btnLabelFullscreen.textContent = on ? "Vollbild aktiv" : "Vollbild";
+    if (on) updateFsFrameInfo();
+  }
+
+  async function enterLabelFullscreen() {
+    if (!labelFullscreenRoot) return;
+    try {
+      if (labelFullscreenRoot.requestFullscreen) {
+        await labelFullscreenRoot.requestFullscreen();
+      } else if (labelFullscreenRoot.webkitRequestFullscreen) {
+        labelFullscreenRoot.webkitRequestFullscreen();
+      } else {
+        if (labelStatusDiv) {
+          labelStatusDiv.textContent =
+            "Vollbild wird von diesem Browser nicht unterstützt.";
+        }
+        return;
+      }
+      updateFsFrameInfo();
+    } catch (e) {
+      if (labelStatusDiv) {
+        labelStatusDiv.textContent = `Vollbild: ${e.message || "fehlgeschlagen"}`;
+      }
+    }
+  }
+
+  async function exitLabelFullscreen() {
+    try {
+      if (getFullscreenElement()) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+      }
+    } catch (_) {}
+    if (btnLabelFullscreen) btnLabelFullscreen.textContent = "Vollbild";
+  }
+
   // ---- UI Elemente ----
   const fileInput = document.getElementById("file-input-local");
   const fpsInput  = document.getElementById("fps-local");
@@ -72,6 +138,15 @@
   const labelStatusDiv = document.getElementById("labelStatus");
   const labeledFraction = document.getElementById("labeledFraction");
   const labeledCountWrap = document.getElementById("labeledCountWrap");
+  const globalLabeledCount = document.getElementById("globalLabeledCount");
+  const labelFullscreenRoot = document.getElementById("labelFullscreenRoot");
+  const btnLabelFullscreen = document.getElementById("btnLabelFullscreen");
+  const labelFsBar = document.getElementById("labelFsBar");
+  const fsExitBtn = document.getElementById("fsExitBtn");
+  const fsPrevBtn = document.getElementById("fsPrevBtn");
+  const fsNegBtn = document.getElementById("fsNegBtn");
+  const fsNextBtn = document.getElementById("fsNextBtn");
+  const fsFrameInfo = document.getElementById("fsFrameInfo");
 
   // ---- State ----
   let currentTaskId = null;
@@ -119,6 +194,20 @@
   if (negativeBtn) negativeBtn.addEventListener("click", saveNegativeAndNext);
   nextBtn.addEventListener("click", nextFrame);
   exportBtn.addEventListener("click", exportZip);
+
+  if (btnLabelFullscreen) {
+    btnLabelFullscreen.addEventListener("click", () => {
+      if (getFullscreenElement() === labelFullscreenRoot) exitLabelFullscreen();
+      else enterLabelFullscreen();
+    });
+  }
+  if (fsExitBtn) fsExitBtn.addEventListener("click", () => exitLabelFullscreen());
+  if (fsPrevBtn) fsPrevBtn.addEventListener("click", () => prevFrame());
+  if (fsNegBtn) fsNegBtn.addEventListener("click", () => saveNegativeAndNext());
+  if (fsNextBtn) fsNextBtn.addEventListener("click", () => nextFrame());
+
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 
   // ---- Keyboard Shortcuts ----
   document.addEventListener("keydown", (e) => {
@@ -322,6 +411,7 @@
     } catch (_) {
       if (labeledFraction) labeledFraction.textContent = "–";
     }
+    void refreshGlobalLabeledTotal();
   }
 
   function startLabeling(taskId) {
@@ -376,6 +466,7 @@
     );
     frameImg.onload = () => {
       setLabelStatus(`Frame ${frameId}/${totalFrames} (${filename})`);
+      updateFsFrameInfo();
     };
   }
 
@@ -530,4 +621,5 @@
     console.log("Label Status:", message);
   }
 
+  void refreshGlobalLabeledTotal();
 })();
