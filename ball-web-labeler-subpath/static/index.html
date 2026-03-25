@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TT Ball Labeler for TTAI</title>
-  <script defer src="static/main.js?v=swipe-no-ball"></script>
+  <script defer src="static/main.js?v=label-counter"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -81,6 +81,7 @@
         <div>
           <strong>Task:</strong> <span id="taskId"></span>
           <span class="muted">| Frames: <span id="frameCount">0</span></span>
+          <span id="labeledCountWrap" class="muted" style="font-size:0.78em;opacity:0.72;font-weight:400;"> · <span id="labeledFraction">–</span> gelabelt</span>
         </div>
         <div class="toolbar">
           <label>Box (px): <input type="number" id="boxSize" value="24" min="6" max="64" step="2" style="width:90px;"></label>

@@ -12,6 +12,7 @@ Features
 - /api/task/{id}/frame/{name}: Bild ausliefern
 - /api/task/{id}/label: Klick speichern (YOLO .txt)
 - /api/task/{id}/label/empty: Negativ-Frame (leere .txt)
+- /api/task/{id}/label-count: Anzahl Frames mit Label-Datei
 - /api/task/{id}/export: ZIP mit YOLO-Struktur erzeugen
 - /api/health:          Healthcheck
 
@@ -405,6 +406,28 @@ def api_ingest_youtube(
 def api_task_frames(task_id: str):
     frames = list_frames(task_id)
     return {"task_id": task_id, "frames": frames}
+
+
+def count_labeled_frames(task_id: str) -> tuple[int, int]:
+    """(Anzahl JPGs mit passender labels/*.txt, Gesamt-JPGs)."""
+    td = DATA_DIR / task_id
+    frames_dir = td / "frames"
+    labels_dir = td / "labels"
+    if not frames_dir.is_dir():
+        return 0, 0
+    frame_stems = {f.stem for f in frames_dir.glob("*.jpg")}
+    labeled = 0
+    if labels_dir.is_dir():
+        for lf in labels_dir.glob("*.txt"):
+            if lf.stem in frame_stems:
+                labeled += 1
+    return labeled, len(frame_stems)
+
+
+@core.get("/api/task/{task_id:path}/label-count")
+def api_task_label_count(task_id: str):
+    labeled, total = count_labeled_frames(task_id)
+    return {"task_id": task_id, "labeled": labeled, "total_frames": total}
 
 
 @core.get("/api/task/{task_id:path}/frame/{filename}")

@@ -70,6 +70,8 @@
   const negativeBtn = document.getElementById("negativeBtn");
   const nextBtn = document.getElementById("nextBtn");
   const labelStatusDiv = document.getElementById("labelStatus");
+  const labeledFraction = document.getElementById("labeledFraction");
+  const labeledCountWrap = document.getElementById("labeledCountWrap");
 
   // ---- State ----
   let currentTaskId = null;
@@ -307,10 +309,27 @@
     }
   }
 
+  async function refreshLabeledCount() {
+    if (!currentTaskId || !labeledFraction) return;
+    try {
+      const r = await fetch(API(`/api/task/${currentTaskId}/label-count`));
+      if (!r.ok) return;
+      const d = await r.json();
+      const lab = typeof d.labeled === "number" ? d.labeled : 0;
+      const tot = typeof d.total_frames === "number" ? d.total_frames : 0;
+      labeledFraction.textContent = `${lab}/${tot}`;
+      if (labeledCountWrap) labeledCountWrap.style.visibility = "visible";
+    } catch (_) {
+      if (labeledFraction) labeledFraction.textContent = "–";
+    }
+  }
+
   function startLabeling(taskId) {
     currentTaskId = taskId;
     taskIdSpan.textContent = taskId;
-    
+    if (labeledFraction) labeledFraction.textContent = "…";
+    if (labeledCountWrap) labeledCountWrap.style.visibility = "visible";
+
     // Lade Frame-Liste
     loadFrames();
     
@@ -333,8 +352,10 @@
 
       if (totalFrames > 0) {
         loadFrame(1);
+        await refreshLabeledCount();
       } else {
         setStatus("❌ Keine Frames für diesen Task.");
+        if (labeledFraction) labeledFraction.textContent = "0/0";
       }
     } catch (error) {
       setStatus(`❌ Fehler beim Laden der Frames: ${error.message}`);
@@ -397,6 +418,7 @@
 
       if (response.ok && result.ok) {
         setLabelStatus(`✅ Ball-Label gespeichert! Frame ${currentFrameId}`);
+        refreshLabeledCount();
         setTimeout(() => nextFrame(), 500);
       } else {
         const err =
@@ -451,6 +473,7 @@
 
       if (response.ok && result.ok) {
         setLabelStatus(`Kein Ball gespeichert (leeres Label): Frame ${currentFrameId}`);
+        refreshLabeledCount();
         setTimeout(() => nextFrame(), 250);
       } else {
         const err =
