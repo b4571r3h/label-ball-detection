@@ -8,6 +8,8 @@ services:
     environment:
       - LABEL_DATA_DIR=/data/labels
       - APP_ROOT_PATH=/ball-detection
+      - LABEL_VIDEO_RETENTION_DAYS=5
+      - LABEL_VIDEO_CLEANUP_INTERVAL_SEC=3600
     volumes:
       - ./ball-web-labeler-subpath/data:/data/labels
     restart: unless-stopped

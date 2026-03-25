@@ -15,6 +15,10 @@ Features
 - /api/task/{id}/export: ZIP mit YOLO-Struktur erzeugen
 - /api/health:          Healthcheck
 
+Umgebung:
+- LABEL_VIDEO_RETENTION_DAYS (Standard 5): Originalvideo video.* löschen wenn älter (0 = aus)
+- LABEL_VIDEO_CLEANUP_INTERVAL_SEC (Standard 3600): Prüfintervall in Sekunden
+
 Subpfad:
 - Per Umgebungsvariable APP_ROOT_PATH (z. B. "/ball-detection")
   wird die App unter diesem Pfad gemountet.
@@ -33,7 +37,9 @@ import time
 import shutil
 import zipfile
 import tempfile
+import asyncio
 import datetime as dt
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
@@ -53,6 +59,10 @@ DATA_DIR = Path(os.getenv("LABEL_DATA_DIR", BASE_DIR / "data")).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 APP_ROOT_PATH = os.getenv("APP_ROOT_PATH", "").rstrip("/")  # z. B. "/ball-detection"
+
+# Originalvideos löschen, wenn älter als N Tage (mtime). 0 = deaktiviert.
+LABEL_VIDEO_RETENTION_DAYS = int(os.getenv("LABEL_VIDEO_RETENTION_DAYS", "5"))
+LABEL_VIDEO_CLEANUP_INTERVAL_SEC = int(os.getenv("LABEL_VIDEO_CLEANUP_INTERVAL_SEC", "3600"))
 
 ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 
@@ -97,6 +107,56 @@ def write_meta(td: Path, meta: dict) -> None:
 def read_meta(td: Path) -> dict:
     f = td / "meta.json"
     return json.loads(f.read_text()) if f.exists() else {}
+
+
+def delete_old_source_videos(data_dir: Path, max_age_days: int) -> int:
+    """Entfernt video.* in Task-Ordnern, deren mtime älter als max_age_days ist."""
+    if max_age_days <= 0:
+        return 0
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    if not data_dir.is_dir():
+        return 0
+    for day_dir in data_dir.iterdir():
+        if not day_dir.is_dir():
+            continue
+        for td in day_dir.iterdir():
+            if not td.is_dir():
+                continue
+            for vid in td.glob("video.*"):
+                if vid.suffix.lower() not in ALLOWED_VIDEO_EXT:
+                    continue
+                try:
+                    if vid.is_file() and vid.stat().st_mtime < cutoff:
+                        vid.unlink()
+                        removed += 1
+                except OSError:
+                    pass
+    return removed
+
+
+@asynccontextmanager
+async def video_retention_lifespan(app: FastAPI):
+    async def cleanup_loop():
+        while True:
+            try:
+                n = delete_old_source_videos(DATA_DIR, LABEL_VIDEO_RETENTION_DAYS)
+                if n:
+                    print(
+                        f"[labeler] Video cleanup: {n} file(s) removed "
+                        f"(>{LABEL_VIDEO_RETENTION_DAYS}d, interval {LABEL_VIDEO_CLEANUP_INTERVAL_SEC}s)"
+                    )
+            except Exception as e:
+                print(f"[labeler] Video cleanup error: {e}")
+            await asyncio.sleep(LABEL_VIDEO_CLEANUP_INTERVAL_SEC)
+
+    task = asyncio.create_task(cleanup_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 def extract_frames(video_path: Path, out_dir: Path, fps: int, max_duration_seconds: int = 120) -> int:
@@ -208,7 +268,11 @@ class EmptyLabelIn(BaseModel):
 # FastAPI Apps (Core + Wrapper für Subpfad)
 # ---------------------------------------------------------------------
 
-core = FastAPI(title="TT Ball Labeler")
+_core_kw = {"title": "TT Ball Labeler"}
+if not APP_ROOT_PATH:
+    _core_kw["lifespan"] = video_retention_lifespan
+
+core = FastAPI(**_core_kw)
 core.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -447,8 +511,8 @@ def api_task_export(task_id: str):
 # ---------------------------------------------------------------------
 
 if APP_ROOT_PATH:
-    # Leere Hülle, die die "core"-App unter dem Subpfad mountet
-    app = FastAPI()
+    # Leere Hülle, die die "core"-App unter dem Subpfad mountet (Lifespan nur hier – Sub-App nicht)
+    app = FastAPI(lifespan=video_retention_lifespan)
     app.mount(APP_ROOT_PATH, core)
 
     @app.get("/", include_in_schema=False)
