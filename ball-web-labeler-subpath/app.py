@@ -186,36 +186,75 @@ def extract_frames(video_path: Path, out_dir: Path, fps: int, max_duration_secon
     if not cap.isOpened():
         raise HTTPException(400, f"Kann Video nicht öffnen: {video_path.name}")
 
-    native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    video_duration = total_frames / native_fps
-    
-    # Begrenze auf max_duration_seconds
-    max_frames = int(native_fps * max_duration_seconds)
-    actual_frames = min(total_frames, max_frames)
-    actual_duration = actual_frames / native_fps
-    
-    print(f"Video Info: {video_duration:.1f}s total, processing first {actual_duration:.1f}s ({actual_frames} frames)")
-    
+    native_fps = cap.get(cv2.CAP_PROP_FPS)
+    try:
+        native_fps = float(native_fps)
+    except Exception:
+        native_fps = 0.0
+    if not native_fps or native_fps <= 0:
+        native_fps = 25.0
+
+    # OpenCV liefert bei manchen Videos (häufig vom YouTube-Download) Frame-Count/Duration nicht zuverlässig.
+    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    try:
+        total_frames = int(total_frames)
+    except Exception:
+        total_frames = 0
+
+    video_duration = (total_frames / native_fps) if total_frames > 0 else 0.0
+
+    # Sampling-Rate (in Frames)
     step = max(int(round(native_fps / max(1, fps))), 1)
+
+    # Stop-Kriterium:
+    # - Wenn Frame-Count bekannt ist -> frame_limit
+    # - Sonst -> time_limit (per CAP_PROP_POS_MSEC bzw. Fallback idx/native_fps)
+    if total_frames > 0:
+        max_frames = int(native_fps * max_duration_seconds)
+        actual_frames = min(total_frames, max_frames)
+        actual_duration = actual_frames / native_fps
+        stop_mode = "frame_limit"
+    else:
+        actual_frames = 0
+        actual_duration = float(max_duration_seconds)
+        stop_mode = "time_limit"
+
+    print(
+        f"Video Info: duration={video_duration:.1f}s frame_count={total_frames} "
+        f"stop_mode={stop_mode}, processing first ~{actual_duration:.1f}s (step={step})"
+    )
+
     idx = 0
     saved = 0
-    
     while True:
         ok, frame = cap.read()
-        if not ok or idx >= actual_frames:
+        if not ok:
             break
+
+        if stop_mode == "frame_limit" and idx >= actual_frames:
+            break
+
         if idx % step == 0:
-            out = out_dir / f"{saved+1:06d}.jpg"
+            out = out_dir / f"{saved + 1:06d}.jpg"
             cv2.imwrite(str(out), frame)
             saved += 1
+
         idx += 1
 
+        if stop_mode == "time_limit":
+            # Zeit anhand der Decoder-Position bestimmen (falls verfügbar)
+            pos_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
+            elapsed_s = None
+            try:
+                elapsed_s = float(pos_msec) / 1000.0
+            except Exception:
+                elapsed_s = None
+            if not elapsed_s or elapsed_s <= 0:
+                elapsed_s = idx / native_fps
+            if elapsed_s > max_duration_seconds:
+                break
+
     cap.release()
-    
-    if video_duration > max_duration_seconds:
-        print(f"Video wurde auf {max_duration_seconds}s begrenzt (Original: {video_duration:.1f}s)")
-    
     return saved
 
 
