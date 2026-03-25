@@ -72,8 +72,21 @@
     }
   }
 
+  let isPseudoFullscreen = false;
+
+  function setPseudoFullscreen(on) {
+    isPseudoFullscreen = Boolean(on);
+    if (labelFullscreenRoot) {
+      labelFullscreenRoot.classList.toggle("pseudo-fullscreen", isPseudoFullscreen);
+    }
+    if (labelFsBar) labelFsBar.style.display = isPseudoFullscreen ? "flex" : "none";
+    if (btnLabelFullscreen) btnLabelFullscreen.textContent = isPseudoFullscreen ? "Vollbild aktiv" : "Vollbild";
+    if (isPseudoFullscreen) updateFsFrameInfo();
+  }
+
   function onFullscreenChange() {
-    const on = labelFullscreenRoot && getFullscreenElement() === labelFullscreenRoot;
+    const nativeOn = labelFullscreenRoot && getFullscreenElement() === labelFullscreenRoot;
+    const on = nativeOn || isPseudoFullscreen;
     if (labelFsBar) labelFsBar.style.display = on ? "flex" : "none";
     if (btnLabelFullscreen) btnLabelFullscreen.textContent = on ? "Vollbild aktiv" : "Vollbild";
     if (on) updateFsFrameInfo();
@@ -82,33 +95,39 @@
   async function enterLabelFullscreen() {
     if (!labelFullscreenRoot) return;
     try {
+      // Native Fullscreen zuerst versuchen; falls es fehlschlägt (oft Mobile/iOS),
+      // verwenden wir einen CSS-Fallback ("Pseudo-Vollbild").
+      setPseudoFullscreen(false);
+
       if (labelFullscreenRoot.requestFullscreen) {
         await labelFullscreenRoot.requestFullscreen();
-      } else if (labelFullscreenRoot.webkitRequestFullscreen) {
-        labelFullscreenRoot.webkitRequestFullscreen();
-      } else {
-        if (labelStatusDiv) {
-          labelStatusDiv.textContent =
-            "Vollbild wird von diesem Browser nicht unterstützt.";
-        }
         return;
       }
-      updateFsFrameInfo();
-    } catch (e) {
-      if (labelStatusDiv) {
-        labelStatusDiv.textContent = `Vollbild: ${e.message || "fehlgeschlagen"}`;
+      if (labelFullscreenRoot.webkitRequestFullscreen) {
+        labelFullscreenRoot.webkitRequestFullscreen();
+        return;
       }
+    } catch (e) {
+      // Fallback
+    }
+
+    setPseudoFullscreen(true);
+    if (labelStatusDiv) {
+      labelStatusDiv.textContent = "Vollbild aktiv (Fallback) – Tipp: Wisch/Buttons funktionieren weiter.";
     }
   }
 
   async function exitLabelFullscreen() {
     try {
+      // Native fullscreen beenden (falls aktiv)
       if (getFullscreenElement()) {
         if (document.exitFullscreen) await document.exitFullscreen();
         else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
       }
     } catch (_) {}
-    if (btnLabelFullscreen) btnLabelFullscreen.textContent = "Vollbild";
+
+    // Immer Pseudo-Mode aus
+    setPseudoFullscreen(false);
   }
 
   // ---- UI Elemente ----
@@ -199,7 +218,7 @@
 
   if (btnLabelFullscreen) {
     btnLabelFullscreen.addEventListener("click", () => {
-      if (getFullscreenElement() === labelFullscreenRoot) exitLabelFullscreen();
+      if (getFullscreenElement() === labelFullscreenRoot || isPseudoFullscreen) exitLabelFullscreen();
       else enterLabelFullscreen();
     });
   }
