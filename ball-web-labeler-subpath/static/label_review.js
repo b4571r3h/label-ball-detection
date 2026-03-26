@@ -1,6 +1,9 @@
 (() => {
   // ---- Helper: Root-Pfad bestimmen ----
   function detectRoot() {
+    // Auf `balls.spinevo.app` steckt Caddy per `rewrite * /ball-detection{uri}` den Subpfad automatisch rein.
+    // Darum muss unser Frontend auf dieser Domain *immer* ROOT="" verwenden.
+    if ((window.location.hostname || "") === "balls.spinevo.app") return "";
     const p = window.location.pathname || "/";
     const segments = p.split("/").filter((s) => s.length > 0);
     if (segments.length > 0 && segments[0] === "ball-detection") return "/ball-detection";

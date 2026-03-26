@@ -3,23 +3,16 @@
 (() => {
   // ---- Helper: Root-Pfad bestimmen ----
   function detectRoot() {
-    const loc = window.location;
-    let p = loc.pathname || "/";
-    
-    console.log("Current pathname:", p);
-    
-    const segments = p.split('/').filter(s => s.length > 0);
-    console.log("Path segments:", segments);
-    
-    if (segments.length > 0 && segments[0] === 'ball-detection') {
-      return '/ball-detection';
-    }
-    
-    if (p.startsWith('/ball-detection')) {
-      return '/ball-detection';
-    }
-    
-    return '';
+    // Auf `balls.spinevo.app` steckt Caddy per `rewrite * /ball-detection{uri}` den Subpfad automatisch rein.
+    // Darum muss unser Frontend auf dieser Domain *immer* ROOT="" verwenden, egal wie der Browser-Pfad aussieht.
+    if ((window.location.hostname || "") === "balls.spinevo.app") return "";
+
+    const p = window.location.pathname || "/";
+    const segments = p.split("/").filter((s) => s.length > 0);
+
+    if (segments.length > 0 && segments[0] === "ball-detection") return "/ball-detection";
+    if (p.startsWith("/ball-detection")) return "/ball-detection";
+    return "";
   }
   
   const ROOT = detectRoot(); 
@@ -31,6 +24,12 @@
     console.log("API URL:", fullUrl);
     return fullUrl;
   };
+
+  // Richtige Ziel-URL für die Label-Review-Seite setzen (damit keine doppelte /ball-detection entsteht).
+  const linkLabelReview = document.getElementById("linkLabelReview");
+  if (linkLabelReview) {
+    linkLabelReview.href = `${ROOT}/label-review/`;
+  }
 
   async function errorTextFromResponse(response) {
     const text = await response.text();
