@@ -1,293 +1,417 @@
 (() => {
-  // ---- Helper: Root-Pfad bestimmen ----
+  // ---- Root-Pfad ----
   function detectRoot() {
-    // Auf `balls.spinevo.app` steckt Caddy per `rewrite * /ball-detection{uri}` den Subpfad automatisch rein.
-    // Darum muss unser Frontend auf dieser Domain *immer* ROOT="" verwenden.
     if ((window.location.hostname || "") === "balls.spinevo.app") return "";
     const p = window.location.pathname || "/";
-    const segments = p.split("/").filter((s) => s.length > 0);
-    if (segments.length > 0 && segments[0] === "ball-detection") return "/ball-detection";
     if (p.startsWith("/ball-detection")) return "/ball-detection";
     return "";
   }
   const ROOT = detectRoot();
+  const API = (path) => `${ROOT}${path.startsWith("/") ? path : "/" + path}`;
 
-  const API = (path) => {
-    const cleanPath = path.startsWith("/") ? path : "/" + path;
-    return `${ROOT}${cleanPath}`;
-  };
-
-  async function errorTextFromResponse(response) {
-    const text = await response.text();
+  async function errorText(r) {
+    const text = await r.text().catch(() => "");
     try {
       const j = JSON.parse(text);
-      if (j.detail !== undefined) {
-        return typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-      }
-    } catch (_) {
-      /* ignore */
-    }
-    return text || `HTTP ${response.status}`;
+      if (j.detail) return typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+    } catch (_) {}
+    return text || `HTTP ${r.status}`;
   }
 
   // ---- DOM ----
-  const taskSelect = document.getElementById("taskSelect");
-  const taskMeta = document.getElementById("taskMeta");
-  const reviewCard = document.getElementById("reviewCard");
-  const reviewFrameInfo = document.getElementById("frameInfo");
-  const labelInfo = document.getElementById("labelInfo");
-  const statusDiv = document.getElementById("status");
-
-  const boxSizeInput = document.getElementById("boxSize");
-  const btnPrev = document.getElementById("btnPrev");
-  const btnNext = document.getElementById("btnNext");
-  const btnOk = document.getElementById("btnOk");
-
-  const frameImg = document.getElementById("frameImg");
+  const taskSelect   = document.getElementById("taskSelect");
+  const loadingTask  = document.getElementById("loadingTask");
+  const statsCard    = document.getElementById("statsCard");
+  const reviewCard   = document.getElementById("reviewCard");
+  const statBall     = document.getElementById("statBall");
+  const statEmpty    = document.getElementById("statEmpty");
+  const statNone     = document.getElementById("statNone");
+  const statTotal    = document.getElementById("statTotal");
+  const navInfo      = document.getElementById("navInfo");
+  const btnPrev      = document.getElementById("btnPrev");
+  const btnNext      = document.getElementById("btnNext");
+  const btnRandom    = document.getElementById("btnRandom");
+  const jumpInput    = document.getElementById("jumpInput");
+  const btnJump      = document.getElementById("btnJump");
+  const frameImg     = document.getElementById("frameImg");
   const labelOverlay = document.getElementById("labelOverlay");
-  const crosshair = document.getElementById("crosshair");
-  const imgBox = document.getElementById("imgBox");
+  const crosshair    = document.getElementById("crosshair");
+  const imgBox       = document.getElementById("imgBox");
+  const labelBadge   = document.getElementById("labelBadge");
+  const boxSizeInput = document.getElementById("boxSize");
+  const btnOk        = document.getElementById("btnOk");
+  const btnNoball    = document.getElementById("btnNoball");
+  const btnDelete    = document.getElementById("btnDelete");
+  const statusMsg    = document.getElementById("statusMsg");
+  const filterTabs   = document.querySelectorAll(".tab[data-filter]");
 
   // ---- State ----
-  let currentTaskId = null;
-  let frames = [];
-  let totalFrames = 0;
-  let currentFrameId = 1;
-  let pendingClick = null; // { filename, cx_px, cy_px } in natural image coordinate space
-  let currentBoxes = []; // last loaded boxes
+  let currentTaskId   = null;
+  let allFrames       = []; // [{filename, status}]  status: "ball"|"empty"|"none"
+  let filteredFrames  = [];
+  let currentFilter   = "all";
+  let currentIndex    = 0;
+  let pendingClick    = null; // {filename, cx, cy} in natürlichen Bildpixeln
+  let busy            = false; // verhindert parallele API-Calls
 
-  function setStatus(msg) {
-    statusDiv.textContent = msg;
-    console.log("Status:", msg);
+  // ---- Status-Anzeige ----
+  function setStatus(msg, isError = false) {
+    statusMsg.textContent = msg;
+    statusMsg.style.color = isError ? "#ef4444" : "#94a3b8";
   }
 
-  function hideCrosshair() {
-    if (!crosshair) return;
+  // ---- Statistik ----
+  function updateStats() {
+    let ball = 0, empty = 0, none = 0;
+    for (const f of allFrames) {
+      if (f.status === "ball") ball++;
+      else if (f.status === "empty") empty++;
+      else none++;
+    }
+    statBall.textContent  = ball.toLocaleString("de-DE");
+    statEmpty.textContent = empty.toLocaleString("de-DE");
+    statNone.textContent  = none.toLocaleString("de-DE");
+    statTotal.textContent = `Gesamt: ${allFrames.length.toLocaleString("de-DE")} Frames`;
+  }
+
+  // ---- Filter ----
+  function applyFilter(filter) {
+    currentFilter = filter;
+    filterTabs.forEach(t => t.classList.toggle("active", t.dataset.filter === filter));
+    filteredFrames = filter === "all" ? [...allFrames] : allFrames.filter(f => f.status === filter);
+    currentIndex = 0;
+    if (filteredFrames.length > 0) {
+      void loadFrame(0);
+    } else {
+      frameImg.src = "";
+      labelOverlay.innerHTML = "";
+      crosshair.style.display = "none";
+      pendingClick = null;
+      updateNav();
+      setStatus(`Keine Frames für diesen Filter.`);
+    }
+  }
+
+  // ---- Navigation ----
+  function updateNav() {
+    const total = filteredFrames.length;
+    navInfo.textContent = total > 0 ? `${currentIndex + 1} / ${total}` : "0 / 0";
+    btnPrev.disabled = currentIndex <= 0;
+    btnNext.disabled = currentIndex >= total - 1;
+  }
+
+  function advance() {
+    if (currentIndex < filteredFrames.length - 1) {
+      void loadFrame(currentIndex + 1);
+    } else {
+      setStatus("Ende der Liste. ✓");
+    }
+  }
+
+  // ---- Frame laden ----
+  async function loadFrame(index) {
+    if (index < 0 || index >= filteredFrames.length) return;
+    currentIndex = index;
+    pendingClick = null;
     crosshair.style.display = "none";
-  }
-
-  function showCrosshair(clientX, clientY) {
-    if (!crosshair || !imgBox) return;
-    const br = imgBox.getBoundingClientRect();
-    const left = clientX - br.left + imgBox.scrollLeft;
-    const top = clientY - br.top + imgBox.scrollTop;
-    const raw = parseFloat(boxSizeInput.value);
-    const dia = Math.max(14, Math.min(120, Number.isFinite(raw) ? raw : 24));
-    crosshair.style.width = `${dia}px`;
-    crosshair.style.height = `${dia}px`;
-    crosshair.style.left = `${left}px`;
-    crosshair.style.top = `${top}px`;
-    crosshair.style.display = "block";
-  }
-
-  function clearOverlay() {
-    if (!labelOverlay) return;
     labelOverlay.innerHTML = "";
+    updateNav();
+
+    const { filename } = filteredFrames[currentIndex];
+    labelBadge.textContent = "Lade…";
+    labelBadge.className = "badge badge-none";
+
+    frameImg.src = API(`/api/task/${encodeURIComponent(currentTaskId)}/frame/${encodeURIComponent(filename)}`);
+    await new Promise(res => { frameImg.onload = res; frameImg.onerror = res; });
+
+    await refreshLabel(filename);
   }
 
-  function renderBoxes(boxes) {
-    clearOverlay();
-    currentBoxes = boxes || [];
-    if (!labelOverlay || !frameImg) return;
-    if (!frameImg.naturalWidth || !frameImg.naturalHeight) return;
+  async function refreshLabel(filename) {
+    const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label?filename=${encodeURIComponent(filename)}`));
+    if (!r.ok) { renderState([], "none"); return; }
+    const d = await r.json();
+    const boxes = Array.isArray(d.boxes) ? d.boxes : [];
+    const status = d.label_missing ? "none" : (boxes.length > 0 ? "ball" : "empty");
 
+    // allFrames-Eintrag aktualisieren
+    const entry = allFrames.find(f => f.filename === filename);
+    if (entry && entry.status !== status) {
+      entry.status = status;
+      updateStats();
+    }
+
+    renderState(boxes, status);
+  }
+
+  function renderState(boxes, status) {
+    labelOverlay.innerHTML = "";
     const displayW = frameImg.clientWidth;
     const displayH = frameImg.clientHeight;
 
-    // Die Kreise sollen auf die angezeigte Größe passen.
-    for (const b of currentBoxes) {
-      const cx = b.cx * displayW;
-      const cy = b.cy * displayH;
-      const w = b.w * displayW;
-      const h = b.h * displayH;
-      const dia = Math.max(w, h);
-
-      const el = document.createElement("div");
-      el.className = "label-circle";
+    for (const b of boxes) {
+      const cx  = b.cx * displayW;
+      const cy  = b.cy * displayH;
+      const dia = Math.max(b.w, b.h) * displayW;
+      const el  = document.createElement("div");
+      el.className  = "label-circle";
       el.style.left = `${cx}px`;
-      el.style.top = `${cy}px`;
-      el.style.width = `${dia}px`;
+      el.style.top  = `${cy}px`;
+      el.style.width  = `${dia}px`;
       el.style.height = `${dia}px`;
       labelOverlay.appendChild(el);
     }
 
-    labelInfo.textContent = currentBoxes.length > 0 ? `${currentBoxes.length} Boxen` : "Kein Ball (leer)";
+    if (status === "ball") {
+      labelBadge.textContent = `● ${boxes.length} Ball${boxes.length !== 1 ? "s" : ""}`;
+      labelBadge.className   = "badge badge-ball";
+    } else if (status === "empty") {
+      labelBadge.textContent = "○ Kein Ball (leer)";
+      labelBadge.className   = "badge badge-empty";
+    } else {
+      labelBadge.textContent = "? Nicht gelabelt";
+      labelBadge.className   = "badge badge-none";
+    }
+    setStatus("");
   }
 
-  async function loadTasks() {
-    setStatus("Lade Tasks…");
-    const r = await fetch(API("/api/tasks"));
-    if (!r.ok) {
-      setStatus(`❌ Tasks laden fehlgeschlagen: ${await errorTextFromResponse(r)}`);
-      return;
+  // ---- Crosshair ----
+  function showCrosshairAt(clientX, clientY) {
+    const br  = imgBox.getBoundingClientRect();
+    const dia = Math.max(14, Math.min(120, parseFloat(boxSizeInput.value) || 24));
+    crosshair.style.display = "block";
+    crosshair.style.width   = `${dia}px`;
+    crosshair.style.height  = `${dia}px`;
+    crosshair.style.left    = `${clientX - br.left}px`;
+    crosshair.style.top     = `${clientY - br.top}px`;
+  }
+
+  // ---- Aktionen ----
+  async function actionOk() {
+    if (busy || !currentTaskId || filteredFrames.length === 0) return;
+    if (pendingClick) {
+      await savePendingClick();
     }
+    advance();
+  }
+
+  async function actionNoball() {
+    if (busy || !currentTaskId || filteredFrames.length === 0) return;
+    busy = true;
+    const filename = filteredFrames[currentIndex].filename;
+    setStatus("Speichere 'Kein Ball'…");
+    try {
+      const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label/empty`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      if (!r.ok) { setStatus(`Fehler: ${await errorText(r)}`, true); return; }
+
+      const entry = allFrames.find(f => f.filename === filename);
+      if (entry) entry.status = "empty";
+      updateStats();
+      setStatus("○ Als 'Kein Ball' gespeichert.");
+
+      // Wenn Filter nur "ball" oder "none" zeigt: Frame verschwindet aus Ansicht
+      if (currentFilter === "ball" || currentFilter === "none") {
+        filteredFrames = allFrames.filter(f => f.status === currentFilter);
+        currentIndex = Math.min(currentIndex, filteredFrames.length - 1);
+        updateNav();
+        if (filteredFrames.length > 0) await loadFrame(currentIndex);
+        else { frameImg.src = ""; labelOverlay.innerHTML = ""; }
+      } else {
+        await refreshLabel(filename);
+        advance();
+      }
+    } finally { busy = false; }
+  }
+
+  async function actionDelete() {
+    if (busy || !currentTaskId || filteredFrames.length === 0) return;
+    busy = true;
+    const filename = filteredFrames[currentIndex].filename;
+    setStatus("Lösche Label…");
+    try {
+      const r = await fetch(
+        API(`/api/task/${encodeURIComponent(currentTaskId)}/label?filename=${encodeURIComponent(filename)}`),
+        { method: "DELETE" }
+      );
+      if (!r.ok) { setStatus(`Fehler: ${await errorText(r)}`, true); return; }
+
+      const entry = allFrames.find(f => f.filename === filename);
+      if (entry) entry.status = "none";
+      updateStats();
+      setStatus("🗑 Label gelöscht.");
+
+      if (currentFilter === "ball" || currentFilter === "empty") {
+        filteredFrames = allFrames.filter(f => f.status === currentFilter);
+        currentIndex = Math.min(currentIndex, filteredFrames.length - 1);
+        updateNav();
+        if (filteredFrames.length > 0) await loadFrame(currentIndex);
+        else { frameImg.src = ""; labelOverlay.innerHTML = ""; }
+      } else {
+        await refreshLabel(filename);
+        advance();
+      }
+    } finally { busy = false; }
+  }
+
+  async function savePendingClick() {
+    if (!pendingClick) return;
+    busy = true;
+    const { filename, cx, cy } = pendingClick;
+    const nw    = frameImg.naturalWidth;
+    const cw    = frameImg.clientWidth;
+    const boxPx = Math.max(2, (parseFloat(boxSizeInput.value) || 24) * (nw / cw));
+
+    setStatus("Speichere Ball-Position…");
+    try {
+      const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, cx, cy, box: boxPx }),
+      });
+      if (!r.ok) { setStatus(`Fehler: ${await errorText(r)}`, true); return; }
+
+      pendingClick = null;
+      crosshair.style.display = "none";
+      const entry = allFrames.find(f => f.filename === filename);
+      if (entry) entry.status = "ball";
+      updateStats();
+      setStatus("✅ Label gespeichert.");
+      await refreshLabel(filename);
+    } finally { busy = false; }
+  }
+
+  // ---- Task laden ----
+  async function loadTasks() {
+    const r = await fetch(API("/api/tasks"));
+    if (!r.ok) { setStatus("Tasks konnten nicht geladen werden.", true); return; }
     const d = await r.json();
     const tasks = Array.isArray(d.tasks) ? d.tasks : [];
-
-    taskSelect.innerHTML = "";
-    const optEmpty = document.createElement("option");
-    optEmpty.value = "";
-    optEmpty.textContent = "(Tasks laden…)";
-    taskSelect.appendChild(optEmpty);
-
+    taskSelect.innerHTML = '<option value="">(Task wählen…)</option>';
     for (const t of tasks) {
       const opt = document.createElement("option");
       opt.value = t.id;
-      const framesCount = typeof t.frames === "number" ? t.frames : 0;
-      opt.textContent = `${t.id} (${framesCount} Frames)`;
+      opt.textContent = `${t.id}  (${(t.frames || 0).toLocaleString("de-DE")} Frames)`;
       taskSelect.appendChild(opt);
     }
-
-    setStatus("Bereit.");
   }
 
-  async function loadFrames() {
-    if (!currentTaskId) return;
-    setStatus("Lade Frames…");
-    const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/frames`));
-    if (!r.ok) {
-      setStatus(`❌ Frames laden fehlgeschlagen: ${await errorTextFromResponse(r)}`);
-      return;
-    }
+  async function loadTaskFrames(taskId) {
+    loadingTask.style.display = "block";
+    statsCard.style.display = "none";
+    reviewCard.style.display = "none";
+    setStatus("Lade Frame-Status…");
+
+    const r = await fetch(API(`/api/task/${encodeURIComponent(taskId)}/frames-status`));
+    loadingTask.style.display = "none";
+
+    if (!r.ok) { setStatus(`Fehler: ${await errorText(r)}`, true); return; }
     const d = await r.json();
-    frames = Array.isArray(d.frames) ? d.frames : [];
-    totalFrames = frames.length;
-    currentFrameId = 1;
-    reviewFrameInfo.textContent = totalFrames > 0 ? `1/${totalFrames}` : `0/0`;
-    pendingClick = null;
-    hideCrosshair();
-    reviewCard.style.display = totalFrames > 0 ? "block" : "none";
-    if (totalFrames > 0) await loadFrame(1);
+    allFrames = Array.isArray(d.frames) ? d.frames : [];
+
+    if (allFrames.length === 0) { setStatus("Keine Frames in diesem Task."); return; }
+
+    updateStats();
+    statsCard.style.display = "block";
+    reviewCard.style.display = "block";
+
+    // Filter zurücksetzen & laden
+    currentFilter = "all";
+    filterTabs.forEach(t => t.classList.toggle("active", t.dataset.filter === "all"));
+    applyFilter("all");
   }
 
-  async function loadLabelForCurrentFrame(filename) {
-    const r = await fetch(
-      API(`/api/task/${encodeURIComponent(currentTaskId)}/label?filename=${encodeURIComponent(filename)}`)
-    );
-    if (!r.ok) {
-      // Wenn Label-Endpunkt nicht vorhanden ist oder Frame fehlt: als leer behandeln.
-      renderBoxes([]);
-      return;
-    }
-    const d = await r.json();
-    const boxes = Array.isArray(d.boxes) ? d.boxes : [];
-    renderBoxes(boxes);
-  }
-
-  async function loadFrame(frameId) {
-    if (frameId < 1 || frameId > totalFrames) return;
-    currentFrameId = frameId;
-    const filename = frames[frameId - 1];
-    if (!filename) return;
-
-    pendingClick = null;
-    hideCrosshair();
-    reviewFrameInfo.textContent = `${currentFrameId}/${totalFrames}`;
-    labelInfo.textContent = "Lade Labels…";
-
-    frameImg.src = API(`/api/task/${encodeURIComponent(currentTaskId)}/frame/${encodeURIComponent(filename)}`);
-    await new Promise((resolve) => {
-      frameImg.onload = () => resolve();
-      frameImg.onerror = () => resolve();
-    });
-
-    const displayOk = frameImg && frameImg.naturalWidth > 0;
-    if (!displayOk) {
-      labelInfo.textContent = "Frame konnte nicht geladen werden";
-      return;
-    }
-
-    await loadLabelForCurrentFrame(filename);
-  }
-
-  function clientPxToNaturalPx(clientX, clientY) {
-    const nw = frameImg.naturalWidth;
-    const nh = frameImg.naturalHeight;
-    const cw = frameImg.clientWidth;
-    const ch = frameImg.clientHeight;
-    if (!nw || !nh || !cw || !ch) return null;
-
-    const rect = frameImg.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    const cx = (x / cw) * nw;
-    const cy = (y / ch) * nh;
-    return { cx, cy };
-  }
-
-  async function saveSingleBoxFromPendingClick() {
-    if (!currentTaskId || !pendingClick) return;
-    const { filename, cx, cy } = pendingClick;
-
-    const nw = frameImg.naturalWidth;
-    const cw = frameImg.clientWidth;
-    if (!nw || !cw) return;
-
-    // server erwartet boxPx in Pixeln bezogen auf das originale Bild.
-    const boxPx = Math.max(2, parseFloat(boxSizeInput.value) * (nw / cw));
-
-    setStatus("Speichere (1 Box)…");
-    const response = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label`), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename, cx, cy, box: boxPx }),
-    });
-
-    let result = {};
-    try {
-      result = await response.json();
-    } catch (_) {}
-
-    if (response.ok && result.ok) {
-      setStatus("✅ Gespeichert. Labels geladen.");
-      pendingClick = null;
-      hideCrosshair();
-      await loadLabelForCurrentFrame(filename);
-    } else {
-      setStatus(`❌ Speichern fehlgeschlagen: ${result.detail || response.status}`);
-    }
-  }
-
-  async function okAction() {
-    if (!currentTaskId) return;
-    if (pendingClick) {
-      await saveSingleBoxFromPendingClick();
-    }
-    if (currentFrameId < totalFrames) await loadFrame(currentFrameId + 1);
-  }
-
-  // ---- Events ----
-  btnPrev.addEventListener("click", () => {
-    if (currentFrameId > 1) void loadFrame(currentFrameId - 1);
-  });
-  btnNext.addEventListener("click", () => {
-    if (currentFrameId < totalFrames) void loadFrame(currentFrameId + 1);
-  });
-  btnOk.addEventListener("click", () => void okAction());
-
-  frameImg.addEventListener("click", (e) => {
-    if (!currentTaskId) return;
-    const filename = frames[currentFrameId - 1];
-    if (!filename) return;
-
-    const xy = clientPxToNaturalPx(e.clientX, e.clientY);
-    if (!xy) return;
-    pendingClick = { filename, cx: xy.cx, cy: xy.cy };
-    showCrosshair(e.clientX, e.clientY);
-    setStatus("Korrigieren-Klick gesetzt. OK übernimmt.");
-  });
-
+  // ---- Event Listener ----
   taskSelect.addEventListener("change", () => {
     const v = taskSelect.value;
     if (!v) return;
     currentTaskId = v;
-    taskMeta.textContent = v;
-    void loadFrames();
+    void loadTaskFrames(v);
+  });
+
+  filterTabs.forEach(tab => {
+    tab.addEventListener("click", () => applyFilter(tab.dataset.filter));
+  });
+
+  btnPrev.addEventListener("click", () => {
+    if (currentIndex > 0) void loadFrame(currentIndex - 1);
+  });
+  btnNext.addEventListener("click", () => {
+    if (currentIndex < filteredFrames.length - 1) void loadFrame(currentIndex + 1);
+  });
+  btnRandom.addEventListener("click", () => {
+    if (filteredFrames.length === 0) return;
+    void loadFrame(Math.floor(Math.random() * filteredFrames.length));
+  });
+  btnJump.addEventListener("click", () => {
+    const n = parseInt(jumpInput.value, 10);
+    if (!Number.isFinite(n) || n < 1) return;
+    void loadFrame(Math.min(filteredFrames.length - 1, n - 1));
+    jumpInput.value = "";
+  });
+  jumpInput.addEventListener("keydown", e => { if (e.key === "Enter") btnJump.click(); });
+
+  btnOk.addEventListener("click",     () => void actionOk());
+  btnNoball.addEventListener("click", () => void actionNoball());
+  btnDelete.addEventListener("click", () => void actionDelete());
+
+  // Klick auf Bild → neue Ball-Position
+  frameImg.addEventListener("click", e => {
+    if (!currentTaskId || filteredFrames.length === 0) return;
+    const filename = filteredFrames[currentIndex]?.filename;
+    if (!filename) return;
+    const nw = frameImg.naturalWidth, nh = frameImg.naturalHeight;
+    const cw = frameImg.clientWidth,  ch = frameImg.clientHeight;
+    if (!nw || !nh || !cw || !ch) return;
+    const rect = frameImg.getBoundingClientRect();
+    const cx = ((e.clientX - rect.left) / cw) * nw;
+    const cy = ((e.clientY - rect.top)  / ch) * nh;
+    pendingClick = { filename, cx, cy };
+    showCrosshairAt(e.clientX, e.clientY);
+    setStatus("Neue Position gesetzt (gelber Kreis). Enter oder OK zum Speichern.");
+  });
+
+  // Crosshair-Position aktualisieren wenn Maus bewegt und pendingClick gesetzt
+  imgBox.addEventListener("mousemove", e => {
+    if (pendingClick) showCrosshairAt(e.clientX, e.clientY);
+  });
+  imgBox.addEventListener("mouseleave", () => {
+    if (!pendingClick) crosshair.style.display = "none";
+  });
+
+  // Keyboard-Shortcuts
+  document.addEventListener("keydown", e => {
+    // Nicht auslösen wenn in Input/Select getippt wird
+    if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA") return;
+    switch (e.key) {
+      case "ArrowLeft":
+        e.preventDefault();
+        if (currentIndex > 0) void loadFrame(currentIndex - 1);
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (currentIndex < filteredFrames.length - 1) void loadFrame(currentIndex + 1);
+        break;
+      case "Enter":
+        e.preventDefault();
+        void actionOk();
+        break;
+      case "n":
+      case "N":
+        e.preventDefault();
+        void actionNoball();
+        break;
+      case "Delete":
+      case "Backspace":
+        e.preventDefault();
+        void actionDelete();
+        break;
+    }
   });
 
   // ---- Start ----
   void loadTasks();
-  reviewCard.style.display = "none";
-  hideCrosshair();
 })();
-

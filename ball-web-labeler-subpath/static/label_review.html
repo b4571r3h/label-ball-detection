@@ -4,97 +4,233 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Label Review</title>
-  <script defer src="static/label_review.js?v=1"></script>
+  <script defer src="static/label_review.js?v=2"></script>
   <style>
-    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
-    .wrap { max-width:1100px; margin:24px auto; padding:0 16px; }
-    .card { background:var(--card); border:1px solid #1f2937; border-radius:14px; padding:16px; }
-    .row { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
-    .btn { background:#1f2937; border:1px solid #374151; padding:14px 18px; border-radius:12px; color:#e5e7eb; cursor:pointer; font-size:16px; }
-    .btn:hover { background:#111827; }
-    .muted { color: var(--muted); font-size:14px; }
-    select, input { height:44px; font-size:16px; }
+    :root {
+      --bg: #0f172a;
+      --card: #111827;
+      --border: #1f2937;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --green: #22c55e;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system; background: var(--bg); color: #e5e7eb; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    h1 { margin: 0 0 16px; font-size: 22px; font-weight: 700; }
 
-    #imgBox { position: relative; display: inline-block; max-width: 100%; touch-action: manipulation; }
-    #frameImg { max-width: 100%; border-radius: 10px; display:block; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+
+    /* Stats */
+    .stats { display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
+    .stat { display: flex; align-items: center; gap: 10px; }
+    .stat-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .dot-ball  { background: var(--green); }
+    .dot-empty { background: var(--yellow); }
+    .dot-none  { background: var(--muted); }
+    .stat-count { font-size: 22px; font-weight: 700; line-height: 1; }
+    .stat-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .stat-total { color: var(--muted); font-size: 13px; margin-left: auto; }
+
+    /* Filter tabs */
+    .filter-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tab {
+      padding: 7px 16px; border-radius: 8px; border: 1px solid var(--border);
+      background: transparent; color: #e5e7eb; cursor: pointer; font-size: 14px;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .tab:hover { background: #1f2937; }
+    .tab.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+
+    /* Nav */
+    .nav-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .nav-info { font-size: 14px; color: var(--muted); min-width: 90px; }
+
+    .btn {
+      background: #1f2937; border: 1px solid #374151; padding: 9px 16px;
+      border-radius: 10px; color: #e5e7eb; cursor: pointer; font-size: 14px;
+      white-space: nowrap; transition: background 0.12s;
+    }
+    .btn:hover:not(:disabled) { background: #374151; }
+    .btn:disabled { opacity: 0.35; cursor: default; }
+    .btn-ok     { background: #14532d; border-color: #166534; color: #dcfce7; }
+    .btn-ok:hover:not(:disabled) { background: #166534; }
+    .btn-noball { background: #451a03; border-color: #78350f; color: #fef3c7; }
+    .btn-noball:hover:not(:disabled) { background: #78350f; }
+    .btn-del    { background: #450a0a; border-color: #7f1d1d; color: #fee2e2; }
+    .btn-del:hover:not(:disabled) { background: #7f1d1d; }
+
+    .jump-input {
+      width: 70px; height: 38px; background: #1f2937; border: 1px solid #374151;
+      border-radius: 8px; color: #e5e7eb; padding: 0 10px; font-size: 14px;
+    }
+    .jump-input:focus { outline: 1px solid var(--accent); }
+
+    /* Image */
+    #imgBox {
+      position: relative; display: inline-block; max-width: 100%;
+      touch-action: manipulation; user-select: none;
+    }
+    #frameImg { max-width: 100%; border-radius: 10px; display: block; cursor: crosshair; }
     #labelOverlay {
-      position:absolute; left:0; top:0;
-      width:100%; height:100%;
-      pointer-events:none;
-      z-index: 20;
+      position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 20;
     }
     .label-circle {
-      position:absolute;
-      border: 2px solid rgba(34,197,94,0.95);
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(34,197,94,0.08);
-      box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+      position: absolute; border: 2px solid rgba(34,197,94,0.9); border-radius: 50%;
+      transform: translate(-50%, -50%); background: rgba(34,197,94,0.08);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.3);
     }
     #crosshair {
-      position:absolute; left:0; top:0;
-      border:2px solid #22c55e; border-radius:50%;
-      width:24px; height:24px;
-      pointer-events:none; z-index: 30;
-      transform: translate(-50%, -50%);
-      display:none;
-      box-shadow: 0 0 0 1px rgba(0,0,0,0.4), 0 0 14px rgba(34, 197, 94, 0.55);
+      position: absolute; border: 2px solid #fbbf24; border-radius: 50%;
+      pointer-events: none; z-index: 30; transform: translate(-50%, -50%); display: none;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.4), 0 0 14px rgba(251,191,36,0.5);
     }
 
-    #reviewBar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .toolbar input { width: 90px; }
+    /* Badge */
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px;
+      border-radius: 20px; font-size: 13px; font-weight: 500;
+    }
+    .badge-ball  { background: rgba(34,197,94,0.12); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+    .badge-empty { background: rgba(245,158,11,0.12); color: var(--yellow); border: 1px solid rgba(245,158,11,0.3); }
+    .badge-none  { background: rgba(148,163,184,0.1); color: var(--muted); border: 1px solid rgba(148,163,184,0.25); }
+
+    /* Kbd hint */
+    .kbd {
+      display: inline-block; background: #0f172a; border: 1px solid #374151;
+      border-radius: 4px; padding: 0 5px; font-size: 11px; font-family: monospace;
+      color: var(--muted); line-height: 18px;
+    }
+
+    .muted { color: var(--muted); font-size: 13px; }
+    #statusMsg { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+    .center { text-align: center; }
+
+    select {
+      height: 40px; font-size: 15px; background: #1f2937; border: 1px solid #374151;
+      border-radius: 8px; color: #e5e7eb; padding: 0 10px; min-width: 340px;
+    }
+    select:focus { outline: 1px solid var(--accent); }
+
     @media (max-width: 640px) {
-      .row { gap:10px; }
-      .btn { width:100%; }
-      .toolbar .btn { width: auto; }
-      #crosshair { width:28px; height:28px; }
+      .stats { gap: 14px; }
+      .stat-count { font-size: 18px; }
+      .btn { padding: 9px 12px; font-size: 13px; }
+      select { min-width: 0; width: 100%; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1 class="page-title">SpinEvo | Label Review <span aria-hidden="true">🧪</span></h1>
-    <p class="muted">Bestehende Labels anzeigen (alle Boxen) und optional per Klick korrigieren. „OK“ übernimmt und geht weiter.</p>
+    <h1>SpinEvo | Label Review</h1>
 
-    <div class="card" style="margin-top:16px;">
-      <div class="row" style="justify-content:space-between;">
+    <!-- Task-Auswahl -->
+    <div class="card">
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <div>
-          <div class="muted">Task auswählen</div>
-          <select id="taskSelect" style="min-width: 360px;">
+          <div class="muted" style="margin-bottom:5px;">Task auswählen</div>
+          <select id="taskSelect">
             <option value="">(Tasks laden…)</option>
           </select>
         </div>
-        <div id="taskMeta" class="muted"></div>
+        <span id="loadingTask" class="muted" style="display:none; margin-top:22px;">Lade…</span>
       </div>
     </div>
 
-    <div class="card" id="reviewCard" style="margin-top:16px; display:none;">
-      <div class="row" style="justify-content:space-between;">
-        <div>
-          <strong>Frame:</strong> <span id="frameInfo">–</span>
-          <span class="muted" id="labelInfo">–</span>
+    <!-- Statistik -->
+    <div class="card" id="statsCard" style="display:none;">
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-dot dot-ball"></div>
+          <div>
+            <div class="stat-count" id="statBall">0</div>
+            <div class="stat-label">mit Ball</div>
+          </div>
         </div>
-        <div class="toolbar">
-          <label class="muted">Box (px): <input type="number" id="boxSize" value="24" min="6" max="64" step="2" /></label>
-          <button class="btn" id="btnPrev" type="button">◀</button>
-          <button class="btn" id="btnOk" type="button" title="Wenn vorher geklickt wurde: Label speichern (1 Box). Sonst nur bestätigen.">OK</button>
-          <button class="btn" id="btnNext" type="button">▶</button>
+        <div class="stat">
+          <div class="stat-dot dot-empty"></div>
+          <div>
+            <div class="stat-count" id="statEmpty">0</div>
+            <div class="stat-label">kein Ball (leer)</div>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-dot dot-none"></div>
+          <div>
+            <div class="stat-count" id="statNone">0</div>
+            <div class="stat-label">ungelabelt</div>
+          </div>
+        </div>
+        <div class="stat-total" id="statTotal"></div>
+      </div>
+    </div>
+
+    <!-- Review-Bereich -->
+    <div class="card" id="reviewCard" style="display:none;">
+
+      <!-- Filter-Tabs -->
+      <div style="margin-bottom:14px;">
+        <div class="filter-tabs">
+          <button class="tab active" data-filter="all">Alle</button>
+          <button class="tab" data-filter="ball">Mit Ball</button>
+          <button class="tab" data-filter="empty">Leer</button>
+          <button class="tab" data-filter="none">Ungelabelt</button>
         </div>
       </div>
 
-      <div style="margin-top:16px; text-align:center;">
+      <!-- Navigation -->
+      <div class="nav-bar" style="margin-bottom:14px;">
+        <span class="nav-info" id="navInfo">– / –</span>
+        <button class="btn" id="btnPrev" type="button" disabled>◀</button>
+        <button class="btn" id="btnRandom" type="button">Zufall</button>
+        <button class="btn" id="btnNext" type="button" disabled>▶</button>
+        <div style="display:flex; gap:6px; align-items:center; margin-left:8px;">
+          <input class="jump-input" id="jumpInput" type="number" min="1" placeholder="#" title="Frame-Nummer eingeben" />
+          <button class="btn" id="btnJump" type="button">→</button>
+        </div>
+      </div>
+
+      <!-- Frame-Bild -->
+      <div class="center">
         <div id="imgBox">
           <img id="frameImg" src="" alt="frame" />
           <div id="labelOverlay"></div>
           <div id="crosshair"></div>
         </div>
       </div>
+
+      <!-- Label-Info + Aktionsbuttons -->
+      <div style="margin-top:14px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:space-between;">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <span id="labelBadge" class="badge badge-none">– nicht geladen</span>
+          <label class="muted" style="display:flex; align-items:center; gap:5px;">
+            Box:
+            <input type="number" id="boxSize" value="24" min="6" max="64" step="2"
+              style="width:56px; height:30px; background:#1f2937; border:1px solid #374151; border-radius:6px; color:#e5e7eb; padding:0 6px; font-size:13px;" />
+            px
+          </label>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-ok"     id="btnOk"     type="button">✓ OK <span class="kbd">↵</span></button>
+          <button class="btn btn-noball" id="btnNoball" type="button">○ Kein Ball <span class="kbd">N</span></button>
+          <button class="btn btn-del"    id="btnDelete" type="button">🗑 Löschen <span class="kbd">Del</span></button>
+        </div>
+      </div>
+
+      <div id="statusMsg"></div>
+
+      <div class="muted" style="margin-top:10px; font-size:12px; line-height:1.6;">
+        Klick auf Bild = neue Ball-Position (gelber Kreis) ·
+        <span class="kbd">↵</span> OK &amp; weiter ·
+        <span class="kbd">N</span> Kein Ball &amp; weiter ·
+        <span class="kbd">Del</span> Label löschen ·
+        <span class="kbd">←</span> <span class="kbd">→</span> navigieren
+      </div>
     </div>
 
-    <div class="muted" id="status" style="margin-top:10px;">Lade…</div>
   </div>
 </body>
 </html>
-

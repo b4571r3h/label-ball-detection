@@ -526,6 +526,36 @@ def api_task_frames(task_id: str):
     return {"task_id": task_id, "frames": frames}
 
 
+@core.get("/api/task/{task_id:path}/frames-status")
+def api_task_frames_status(task_id: str):
+    """
+    Gibt alle Frames mit Label-Status zurück: 'ball', 'empty' oder 'none'.
+    - ball:  labels/stem.txt existiert und hat Inhalt (mind. 1 Box)
+    - empty: labels/stem.txt existiert, aber leer (Negativ-Beispiel)
+    - none:  labels/stem.txt fehlt (noch nicht gelabelt)
+    """
+    td = task_dir(task_id)
+    frames = list_frames(task_id)
+    labels_dir = td / "labels"
+
+    result = []
+    stats = {"ball": 0, "empty": 0, "none": 0}
+
+    for filename in frames:
+        stem = Path(filename).stem
+        lab_path = labels_dir / f"{stem}.txt"
+        if not lab_path.exists():
+            status = "none"
+        elif _is_yolo_label_with_ball(lab_path):
+            status = "ball"
+        else:
+            status = "empty"
+        stats[status] += 1
+        result.append({"filename": filename, "status": status})
+
+    return {"task_id": task_id, "frames": result, "stats": stats}
+
+
 def count_labeled_frames(task_id: str) -> tuple[int, int]:
     """(Anzahl JPGs mit passender labels/*.txt, Gesamt-JPGs)."""
     td = DATA_DIR / task_id
@@ -1141,6 +1171,21 @@ def api_task_empty_label(task_id: str, body: EmptyLabelIn):
     lab_path.write_text("", encoding="utf-8")
 
     return {"ok": True, "saved": lab_path.name, "negative": True}
+
+
+@core.delete("/api/task/{task_id:path}/label")
+def api_task_delete_label(task_id: str, filename: str = Query(...)):
+    """Löscht die Label-Datei eines Frames (Frame wird wieder 'ungelabelt')."""
+    td = task_dir(task_id)
+    img = (td / "frames" / filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+
+    lab_path = (td / "labels" / (Path(filename).stem + ".txt")).resolve()
+    if lab_path.exists():
+        lab_path.unlink()
+
+    return {"ok": True, "deleted": lab_path.name}
 
 
 # -------------------- Export ZIP (YOLO-Struktur) --------------------
