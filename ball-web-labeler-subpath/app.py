@@ -394,6 +394,12 @@ def index_html():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@core.get("/label-review", include_in_schema=False)
+def label_review_html():
+    """Separate Seite zum Prüfen/Bearbeiten bestehender Labels."""
+    return FileResponse(str(STATIC_DIR / "label_review.html"))
+
+
 @core.get("/api/health")
 def api_health():
     return {"status": "ok"}
@@ -586,6 +592,68 @@ def iter_labeler_yolo_pairs() -> list[tuple[str, Path, Path]]:
                     continue
                 out.append((rel, img.resolve(), lab))
     return out
+
+
+def _is_yolo_label_with_ball(label_path: Path) -> bool:
+    """
+    YOLO Negativ = leere .txt (0 Bytes) oder nur Whitespace.
+    Positiv = mindestens eine Box-Zeile -> Datei enthält non-whitespace Content.
+    """
+    try:
+        # Dateien sind typischerweise klein; Lesen ist ok für Stats-Zählung.
+        return bool(label_path.read_text(encoding="utf-8").strip())
+    except Exception:
+        # Falls Lesen fehlschlägt: als "kein Ball" werten, um nicht zu überschätzen.
+        return False
+
+
+def count_labeler_frames_with_ball() -> int:
+    """Zählt Frames mit Ball: (DATA_DIR) frame.jpg existiert + labels/stem.txt ist nicht-leer."""
+    if not DATA_DIR.is_dir():
+        return 0
+
+    total = 0
+    for day_dir in sorted(DATA_DIR.iterdir()):
+        if not day_dir.is_dir():
+            continue
+        for task_sub in day_dir.iterdir():
+            if not task_sub.is_dir():
+                continue
+            frames_dir = task_sub / "frames"
+            labels_dir = task_sub / "labels"
+            if not frames_dir.is_dir() or not labels_dir.is_dir():
+                continue
+
+            frame_stems = {f.stem for f in frames_dir.glob("*.jpg")}
+            for lf in labels_dir.glob("*.txt"):
+                if lf.stem not in frame_stems:
+                    continue
+                if _is_yolo_label_with_ball(lf):
+                    total += 1
+    return total
+
+
+def count_import_frames_with_ball(root: Optional[Path]) -> int:
+    """Zählt Import-Frames mit Ball: Import images/{train,val} + labels/{train,val} .txt ist nicht-leer."""
+    if root is None or not root.is_dir():
+        return 0
+
+    root = root.resolve()
+    total = 0
+    for split in ("train", "val"):
+        idir = root / "images" / split
+        ldir = root / "labels" / split
+        if not idir.is_dir() or not ldir.is_dir():
+            continue
+        for img in idir.iterdir():
+            if not img.is_file():
+                continue
+            if img.suffix.lower() not in IMPORT_YOLO_IMG_EXT:
+                continue
+            lab = (ldir / f"{img.stem}.txt").resolve()
+            if lab.is_file() and _is_yolo_label_with_ball(lab):
+                total += 1
+    return total
 
 
 def iter_import_yolo_split_pairs(
@@ -862,6 +930,28 @@ def api_stats_labeled_export():
 
 
 @core.get(
+    "/api/stats/labeled-balls-total",
+    tags=["export"],
+    summary="Anzahl Frames mit Ball (nicht-leere YOLO-Labels)",
+    dependencies=[Depends(require_export_bearer)],
+)
+def api_stats_labeled_balls_total():
+    """
+    Zählt nur Frames, bei denen die YOLO-Labeldatei nicht leer ist (Ball sichtbar).
+
+    - Labeler-Teil: DATA_DIR (frames/*.jpg + labels/*.txt)
+    - Optional Import-Teil: IMPORT_YOLO_BALL_DIR (images/{train,val} + passende labels)
+    """
+    ball_labeler = count_labeler_frames_with_ball()
+    ball_import = count_import_frames_with_ball(IMPORT_YOLO_BALL_DIR)
+    return {
+        "frames_with_ball_total": ball_labeler + ball_import,
+        "frames_with_ball_labeler": ball_labeler,
+        "frames_with_ball_import": ball_import,
+    }
+
+
+@core.get(
     "/api/export/yolo-dataset-full",
     tags=["export"],
     summary="YOLOv8-Dataset-ZIP (Labeler + optional Import)",
@@ -985,6 +1075,58 @@ def api_task_save_label(task_id: str, li: LabelIn):
     lab_path.write_text(txt, encoding="utf-8")
 
     return {"ok": True, "saved": lab_path.name}
+
+
+@core.get("/api/task/{task_id:path}/label")
+def api_task_get_label(task_id: str, filename: str):
+    """
+    Lädt bestehende YOLO-Label für eine Frame-Datei.
+
+    Antwort:
+    - has_ball: bool
+    - boxes: Liste von {class_id, cx, cy, w, h} (alle normalisiert 0..1)
+    """
+    td = task_dir(task_id)
+    img = (td / "frames" / filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+
+    lab_path = (td / "labels" / (Path(filename).stem + ".txt")).resolve()
+    if not lab_path.exists():
+        return {"filename": filename, "has_ball": False, "boxes": [], "label_missing": True}
+
+    boxes = []
+    try:
+        content = lab_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        content = ""
+
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        try:
+            class_id = int(float(parts[0]))
+            cx = float(parts[1])
+            cy = float(parts[2])
+            w = float(parts[3])
+            h = float(parts[4])
+        except Exception:
+            continue
+
+        # clamp (normalisiert 0..1)
+        cx = min(max(cx, 0.0), 1.0)
+        cy = min(max(cy, 0.0), 1.0)
+        w = min(max(w, 0.0), 1.0)
+        h = min(max(h, 0.0), 1.0)
+
+        boxes.append({"class_id": class_id, "cx": cx, "cy": cy, "w": w, "h": h})
+
+    has_ball = len(boxes) > 0
+    return {"filename": filename, "has_ball": has_ball, "boxes": boxes, "label_missing": False}
 
 
 @core.post("/api/task/{task_id:path}/label/empty")
