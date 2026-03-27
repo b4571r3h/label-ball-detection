@@ -981,6 +981,44 @@ def api_stats_labeled_balls_total():
     }
 
 
+@core.get("/api/stats/frames-overview")
+def api_stats_frames_overview():
+    """
+    Task-übergreifende Übersicht aller Frames im Labeler-Datenverzeichnis.
+
+    Gibt zurück:
+    - ball:  Frames mit nicht-leerer YOLO-Label-Datei (Ball erkennbar)
+    - empty: Frames mit leerer YOLO-Label-Datei (bewusst kein Ball)
+    - none:  Frames ohne jede Label-Datei (noch nicht gelabelt)
+    - total: Gesamtanzahl Frames
+    """
+    ball = 0
+    empty = 0
+    none = 0
+
+    if DATA_DIR.is_dir():
+        for day_dir in sorted(DATA_DIR.iterdir()):
+            if not day_dir.is_dir():
+                continue
+            for task_sub in sorted(day_dir.iterdir()):
+                if not task_sub.is_dir():
+                    continue
+                frames_dir = task_sub / "frames"
+                labels_dir = task_sub / "labels"
+                if not frames_dir.is_dir():
+                    continue
+                for img in frames_dir.glob("*.jpg"):
+                    lab = labels_dir / f"{img.stem}.txt"
+                    if not lab.exists():
+                        none += 1
+                    elif _is_yolo_label_with_ball(lab):
+                        ball += 1
+                    else:
+                        empty += 1
+
+    return {"ball": ball, "empty": empty, "none": none, "total": ball + empty + none}
+
+
 @core.get(
     "/api/export/yolo-dataset-full",
     tags=["export"],

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Label Review</title>
-  <script defer src="static/label_review.js?v=2"></script>
+  <script defer src="static/label_review.js?v=3"></script>
   <style>
     :root {
       --bg: #0f172a;
@@ -126,6 +126,38 @@
 <body>
   <div class="wrap">
     <h1>SpinEvo | Label Review</h1>
+
+    <!-- Globale Gesamt-Statistik -->
+    <div class="card" id="globalStatsCard">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <span style="font-size:13px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Gesamt (alle Tasks)</span>
+        <button id="btnRefreshGlobal" class="btn" style="padding:4px 10px; font-size:12px;">↺</button>
+      </div>
+      <div class="stats" id="globalStats">
+        <div class="stat">
+          <div class="stat-dot dot-ball"></div>
+          <div>
+            <div class="stat-count" id="gStatBall">…</div>
+            <div class="stat-label">mit Ball</div>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-dot dot-empty"></div>
+          <div>
+            <div class="stat-count" id="gStatEmpty">…</div>
+            <div class="stat-label">kein Ball (leer)</div>
+          </div>
+        </div>
+        <div class="stat">
+          <div class="stat-dot dot-none"></div>
+          <div>
+            <div class="stat-count" id="gStatNone">…</div>
+            <div class="stat-label">ungelabelt</div>
+          </div>
+        </div>
+        <div class="stat-total" id="gStatTotal"></div>
+      </div>
+    </div>
 
     <!-- Task-Auswahl -->
     <div class="card">

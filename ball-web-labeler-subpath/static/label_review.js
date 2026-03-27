@@ -19,6 +19,11 @@
   }
 
   // ---- DOM ----
+  const gStatBall        = document.getElementById("gStatBall");
+  const gStatEmpty       = document.getElementById("gStatEmpty");
+  const gStatNone        = document.getElementById("gStatNone");
+  const gStatTotal       = document.getElementById("gStatTotal");
+  const btnRefreshGlobal = document.getElementById("btnRefreshGlobal");
   const taskSelect   = document.getElementById("taskSelect");
   const loadingTask  = document.getElementById("loadingTask");
   const statsCard    = document.getElementById("statsCard");
@@ -284,6 +289,21 @@
     } finally { busy = false; }
   }
 
+  // ---- Globale Statistik ----
+  async function loadGlobalStats() {
+    gStatBall.textContent = "…";
+    gStatEmpty.textContent = "…";
+    gStatNone.textContent = "…";
+    gStatTotal.textContent = "";
+    const r = await fetch(API("/api/stats/frames-overview"));
+    if (!r.ok) { gStatBall.textContent = gStatEmpty.textContent = gStatNone.textContent = "–"; return; }
+    const d = await r.json();
+    gStatBall.textContent  = (d.ball  ?? 0).toLocaleString("de-DE");
+    gStatEmpty.textContent = (d.empty ?? 0).toLocaleString("de-DE");
+    gStatNone.textContent  = (d.none  ?? 0).toLocaleString("de-DE");
+    gStatTotal.textContent = `Gesamt: ${(d.total ?? 0).toLocaleString("de-DE")} Frames`;
+  }
+
   // ---- Task laden ----
   async function loadTasks() {
     const r = await fetch(API("/api/tasks"));
@@ -412,6 +432,9 @@
     }
   });
 
+  btnRefreshGlobal.addEventListener("click", () => void loadGlobalStats());
+
   // ---- Start ----
+  void loadGlobalStats();
   void loadTasks();
 })();
