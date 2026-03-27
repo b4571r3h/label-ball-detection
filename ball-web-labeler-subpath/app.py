@@ -336,6 +336,9 @@ def download_youtube(url: str) -> Path:
         "no_warnings": True,
         "noprogress": True,
     }
+    cookies_path = DATA_DIR / "yt_cookies.txt"
+    if cookies_path.exists():
+        ydl_opts["cookiefile"] = str(cookies_path)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -445,6 +448,46 @@ def label_review_html():
 @core.get("/api/health")
 def api_health():
     return {"status": "ok"}
+
+
+# -------------------- YouTube-Cookie-Verwaltung --------------------
+
+@core.get("/api/yt-cookies/status")
+def api_yt_cookies_status():
+    """Gibt zurück ob eine yt_cookies.txt hinterlegt ist."""
+    p = DATA_DIR / "yt_cookies.txt"
+    if p.exists():
+        stat = p.stat()
+        return {
+            "configured": True,
+            "size_bytes": stat.st_size,
+            "modified": dt.datetime.utcfromtimestamp(stat.st_mtime).isoformat() + "Z",
+        }
+    return {"configured": False}
+
+
+@core.post("/api/yt-cookies/upload")
+async def api_yt_cookies_upload(file: UploadFile = File(...)):
+    """Lädt eine Netscape-cookies.txt hoch (für yt-dlp beim YouTube-Ingest)."""
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(400, "Cookie-Datei zu groß (max. 2 MB)")
+    # Grobe Validierung: Netscape-Cookie-Header
+    text = content.decode("utf-8", errors="ignore")
+    if "# Netscape HTTP Cookie File" not in text and "# HTTP Cookie File" not in text:
+        raise HTTPException(400, "Keine gültige Netscape-cookies.txt (Header fehlt)")
+    p = DATA_DIR / "yt_cookies.txt"
+    p.write_bytes(content)
+    return {"ok": True, "size_bytes": len(content)}
+
+
+@core.delete("/api/yt-cookies")
+def api_yt_cookies_delete():
+    """Löscht die hinterlegte yt_cookies.txt."""
+    p = DATA_DIR / "yt_cookies.txt"
+    if p.exists():
+        p.unlink()
+    return {"ok": True}
 
 
 @core.get("/api/tasks")

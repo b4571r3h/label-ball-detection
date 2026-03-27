@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Ball Detection</title>
-  <script defer src="static/main.js?v=review-fix-1"></script>
+  <script defer src="static/main.js?v=yt-cookies"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -175,6 +175,15 @@
           <input id="yt-url" type="url" placeholder="https://www.youtube.com/watch?v=..." style="width:100%; padding:12px; border-radius:8px; border:1px solid #374151; background:#0b1220; color:#e5e7eb;" />
           <div style="margin-top:8px;" class="muted">FPS: <input id="fps-yt" type="number" value="5" step="0.5" style="width:90px;"> | Task-Name: <input id="task-yt" type="text" placeholder="optional"></div>
           <button class="btn" id="btn-yt">Ingest YouTube & Frames extrahieren</button>
+          <div id="yt-cookie-status" style="margin-top:8px; font-size:13px; color:#94a3b8;"></div>
+          <div style="margin-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:13px; color:#94a3b8; cursor:pointer;">
+              🍪 cookies.txt hochladen:
+              <input id="yt-cookie-file" type="file" accept=".txt" style="font-size:13px;">
+            </label>
+            <button class="btn" id="btn-cookie-upload" type="button" style="padding:8px 12px; font-size:13px;">Hochladen</button>
+            <button class="btn" id="btn-cookie-delete" type="button" style="padding:8px 12px; font-size:13px; display:none;">🗑 Löschen</button>
+          </div>
         </div>
       </div>
       <div class="muted" id="status" style="margin-top:8px;">Bereit.</div>

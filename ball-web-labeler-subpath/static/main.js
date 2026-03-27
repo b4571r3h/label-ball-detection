@@ -150,6 +150,10 @@
   const fpsYtInput = document.getElementById("fps-yt");
   const taskYtInput = document.getElementById("task-yt");
   const ytBtn = document.getElementById("btn-yt");
+  const ytCookieStatus  = document.getElementById("yt-cookie-status");
+  const ytCookieFile    = document.getElementById("yt-cookie-file");
+  const btnCookieUpload = document.getElementById("btn-cookie-upload");
+  const btnCookieDelete = document.getElementById("btn-cookie-delete");
   
   const labelCard = document.getElementById("labelCard");
   const taskIdSpan = document.getElementById("taskId");
@@ -717,4 +721,53 @@
   }
 
   void refreshGlobalLabeledTotal();
+
+  // ---- YouTube Cookie-Verwaltung ----
+  async function refreshCookieStatus() {
+    if (!ytCookieStatus) return;
+    try {
+      const r = await fetch(API("/api/yt-cookies/status"));
+      const d = await r.json();
+      if (d.configured) {
+        const date = new Date(d.modified).toLocaleDateString("de-DE");
+        ytCookieStatus.textContent = `🍪 cookies.txt aktiv (${(d.size_bytes / 1024).toFixed(1)} KB, hochgeladen ${date})`;
+        ytCookieStatus.style.color = "#22c55e";
+        if (btnCookieDelete) btnCookieDelete.style.display = "inline-block";
+      } else {
+        ytCookieStatus.textContent = "⚠️ Keine cookies.txt – YouTube von Server-IPs wird oft geblockt";
+        ytCookieStatus.style.color = "#f59e0b";
+        if (btnCookieDelete) btnCookieDelete.style.display = "none";
+      }
+    } catch (_) {}
+  }
+
+  if (btnCookieUpload) {
+    btnCookieUpload.addEventListener("click", async () => {
+      const file = ytCookieFile?.files?.[0];
+      if (!file) { setStatus("Bitte zuerst eine cookies.txt Datei auswählen."); return; }
+      const fd = new FormData();
+      fd.append("file", file);
+      setStatus("Lade cookies.txt hoch…");
+      const r = await fetch(API("/api/yt-cookies/upload"), { method: "POST", body: fd });
+      if (r.ok) {
+        setStatus("✅ cookies.txt gespeichert. YouTube-Ingest sollte jetzt funktionieren.");
+        ytCookieFile.value = "";
+        void refreshCookieStatus();
+      } else {
+        setStatus(`❌ Cookie-Upload fehlgeschlagen: ${await errorTextFromResponse(r)}`);
+      }
+    });
+  }
+
+  if (btnCookieDelete) {
+    btnCookieDelete.addEventListener("click", async () => {
+      const r = await fetch(API("/api/yt-cookies"), { method: "DELETE" });
+      if (r.ok) {
+        setStatus("🗑 cookies.txt gelöscht.");
+        void refreshCookieStatus();
+      }
+    });
+  }
+
+  void refreshCookieStatus();
 })();
