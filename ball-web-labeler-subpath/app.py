@@ -315,9 +315,26 @@ def download_youtube(url: str) -> Path:
         "noprogress": True,
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        file = ydl.prepare_filename(info)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file = ydl.prepare_filename(info)
+    except yt_dlp.utils.DownloadError as e:
+        msg = str(e)
+        # Häufige Ursachen verständlich machen
+        if "Sign in" in msg or "age" in msg.lower():
+            hint = "Video ist altersbeschränkt oder erfordert Login."
+        elif "Private" in msg or "private" in msg:
+            hint = "Video ist privat."
+        elif "unavailable" in msg.lower() or "not available" in msg.lower():
+            hint = "Video nicht verfügbar (ggf. gesperrt oder gelöscht)."
+        elif "HTTP Error 429" in msg or "Too Many Requests" in msg:
+            hint = "YouTube rate-limit (429). Kurz warten und erneut versuchen."
+        else:
+            hint = msg.split("\n")[0]  # erste Zeile der yt-dlp-Meldung
+        raise HTTPException(422, f"YouTube-Download fehlgeschlagen: {hint}") from e
+    except Exception as e:
+        raise HTTPException(500, f"Unerwarteter Fehler beim YouTube-Download: {e}") from e
 
     p = Path(file)
     if not p.exists():
