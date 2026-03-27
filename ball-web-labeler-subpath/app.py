@@ -212,14 +212,27 @@ async def video_retention_lifespan(app: FastAPI):
         pass
 
 
-def extract_frames(video_path: Path, out_dir: Path, fps: int, max_duration_seconds: int = 120) -> int:
+def extract_frames(
+    video_path: Path,
+    out_dir: Path,
+    fps: int,
+    max_duration_seconds: int = 120,
+    max_width: int = 1280,
+    jpeg_quality: int = 85,
+) -> int:
     """Extrahiert Frames mit OpenCV (keine ffmpeg-Abhängigkeit).
-    
+
     Args:
-        video_path: Pfad zum Video
-        out_dir: Ausgabeordner für Frames
-        fps: Gewünschte FPS für Extraktion
-        max_duration_seconds: Maximale Dauer in Sekunden (Standard: 120 = 2 Minuten)
+        video_path:           Pfad zum Video
+        out_dir:              Ausgabeordner für Frames
+        fps:                  Gewünschte FPS für Extraktion
+        max_duration_seconds: Maximale Dauer in Sekunden (Standard: 120 = 2 Min)
+        max_width:            Maximale Breite in Pixeln (0 = kein Resize).
+                              1280 ist ein guter Kompromiss: kleiner Export,
+                              aber genug Detail für YOLO imgsz=1280.
+        jpeg_quality:         JPEG-Qualität 0–100 (Standard 85).
+                              95 wäre OpenCV-Default, 85 spart ~30 % Größe
+                              bei kaum sichtbarem Qualitätsverlust.
     """
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -274,8 +287,17 @@ def extract_frames(video_path: Path, out_dir: Path, fps: int, max_duration_secon
             break
 
         if idx % step == 0:
+            if max_width > 0:
+                h, w = frame.shape[:2]
+                if w > max_width:
+                    scale = max_width / w
+                    frame = cv2.resize(
+                        frame,
+                        (max_width, int(h * scale)),
+                        interpolation=cv2.INTER_AREA,
+                    )
             out = out_dir / f"{saved + 1:06d}.jpg"
-            cv2.imwrite(str(out), frame)
+            cv2.imwrite(str(out), frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
             saved += 1
 
         idx += 1
