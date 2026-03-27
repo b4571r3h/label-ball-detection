@@ -23,6 +23,13 @@
   const gStatEmpty       = document.getElementById("gStatEmpty");
   const gStatNone        = document.getElementById("gStatNone");
   const gStatTotal       = document.getElementById("gStatTotal");
+  const importStatsWrap  = document.getElementById("importStatsWrap");
+  const gStatImportBall  = document.getElementById("gStatImportBall");
+  const gStatImportEmpty = document.getElementById("gStatImportEmpty");
+  const gStatImportTotal = document.getElementById("gStatImportTotal");
+  const gStatCombBall    = document.getElementById("gStatCombBall");
+  const gStatCombEmpty   = document.getElementById("gStatCombEmpty");
+  const gStatCombTotal   = document.getElementById("gStatCombTotal");
   const btnRefreshGlobal = document.getElementById("btnRefreshGlobal");
   const taskSelect   = document.getElementById("taskSelect");
   const loadingTask  = document.getElementById("loadingTask");
@@ -298,10 +305,26 @@
     const r = await fetch(API("/api/stats/frames-overview"));
     if (!r.ok) { gStatBall.textContent = gStatEmpty.textContent = gStatNone.textContent = "–"; return; }
     const d = await r.json();
+
+    // App-Daten
     gStatBall.textContent  = (d.ball  ?? 0).toLocaleString("de-DE");
     gStatEmpty.textContent = (d.empty ?? 0).toLocaleString("de-DE");
     gStatNone.textContent  = (d.none  ?? 0).toLocaleString("de-DE");
-    gStatTotal.textContent = `Gesamt: ${(d.total ?? 0).toLocaleString("de-DE")} Frames`;
+    const appLabeled = (d.ball ?? 0) + (d.empty ?? 0);
+    gStatTotal.textContent = `${appLabeled.toLocaleString("de-DE")} gelabelt · ${(d.total ?? 0).toLocaleString("de-DE")} gesamt`;
+
+    // Import
+    if ((d.import_total ?? 0) > 0) {
+      importStatsWrap.style.display = "block";
+      gStatImportBall.textContent  = (d.import_ball  ?? 0).toLocaleString("de-DE");
+      gStatImportEmpty.textContent = (d.import_empty ?? 0).toLocaleString("de-DE");
+      gStatImportTotal.textContent = `${(d.import_total ?? 0).toLocaleString("de-DE")} gesamt`;
+      gStatCombBall.textContent    = (d.combined_ball   ?? 0).toLocaleString("de-DE");
+      gStatCombEmpty.textContent   = (d.combined_empty  ?? 0).toLocaleString("de-DE");
+      gStatCombTotal.textContent   = `${(d.combined_labeled ?? 0).toLocaleString("de-DE")} gelabelt`;
+    } else {
+      importStatsWrap.style.display = "none";
+    }
   }
 
   // ---- Task laden ----

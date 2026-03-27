@@ -1069,13 +1069,16 @@ def api_stats_labeled_balls_total():
 @core.get("/api/stats/frames-overview")
 def api_stats_frames_overview():
     """
-    Task-übergreifende Übersicht aller Frames im Labeler-Datenverzeichnis.
+    Übersicht aller Frames: App-Daten (DATA_DIR) + optionaler Import.
 
-    Gibt zurück:
-    - ball:  Frames mit nicht-leerer YOLO-Label-Datei (Ball erkennbar)
-    - empty: Frames mit leerer YOLO-Label-Datei (bewusst kein Ball)
-    - none:  Frames ohne jede Label-Datei (noch nicht gelabelt)
-    - total: Gesamtanzahl Frames
+    App-Daten (ball/empty/none):
+    - ball:  Label-Datei vorhanden und nicht leer (Ball erkennbar)
+    - empty: Label-Datei vorhanden und leer (bewusst kein Ball)
+    - none:  Keine Label-Datei (noch nicht gelabelt)
+
+    Import (IMPORT_YOLO_BALL_DIR, falls konfiguriert):
+    - import_ball:  nicht-leere Labels im Import-Ordner
+    - import_empty: leere Labels im Import-Ordner
     """
     ball = 0
     empty = 0
@@ -1101,7 +1104,42 @@ def api_stats_frames_overview():
                     else:
                         empty += 1
 
-    return {"ball": ball, "empty": empty, "none": none, "total": ball + empty + none}
+    # Import-Ordner
+    import_ball = 0
+    import_empty = 0
+    root = IMPORT_YOLO_BALL_DIR
+    if root and root.is_dir():
+        for split in ("train", "val"):
+            idir = root / "images" / split
+            ldir = root / "labels" / split
+            if not idir.is_dir() or not ldir.is_dir():
+                continue
+            for img in idir.iterdir():
+                if img.suffix.lower() not in IMPORT_YOLO_IMG_EXT:
+                    continue
+                lab = ldir / f"{img.stem}.txt"
+                if not lab.exists():
+                    continue  # Import-Frames ohne Label werden nicht gezählt
+                if _is_yolo_label_with_ball(lab):
+                    import_ball += 1
+                else:
+                    import_empty += 1
+
+    return {
+        # App-Daten
+        "ball": ball,
+        "empty": empty,
+        "none": none,
+        "total": ball + empty + none,
+        # Import
+        "import_ball": import_ball,
+        "import_empty": import_empty,
+        "import_total": import_ball + import_empty,
+        # Kombiniert (was im Export landet)
+        "combined_ball": ball + import_ball,
+        "combined_empty": empty + import_empty,
+        "combined_labeled": ball + empty + import_ball + import_empty,
+    }
 
 
 @core.get(
