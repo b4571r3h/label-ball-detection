@@ -401,6 +401,17 @@ class EmptyLabelIn(BaseModel):
     filename: str
 
 
+class TableKeypointIn(BaseModel):
+    x: float   # normalisiert 0–1 (0 wenn v=0)
+    y: float   # normalisiert 0–1 (0 wenn v=0)
+    v: int     # 0=nicht im Bild, 1=verdeckt, 2=sichtbar
+
+
+class TableLabelIn(BaseModel):
+    filename: str
+    keypoints: list[TableKeypointIn]  # genau 6: TL TR BR BL Netz-L Netz-R
+
+
 # ---------------------------------------------------------------------
 # FastAPI Apps (Core + Wrapper für Subpfad)
 # ---------------------------------------------------------------------
@@ -443,6 +454,12 @@ def index_html():
 def label_review_html():
     """Separate Seite zum Prüfen/Bearbeiten bestehender Labels."""
     return FileResponse(str(STATIC_DIR / "label_review.html"))
+
+
+@core.get("/table-labeling", include_in_schema=False)
+def table_labeling_html():
+    """Tisch-Keypoint-Labeling (4 Ecken + Netz für YOLO-Pose)."""
+    return FileResponse(str(STATIC_DIR / "table_labeling.html"))
 
 
 @core.get("/api/health")
@@ -1347,6 +1364,179 @@ def api_task_delete_label(task_id: str, filename: str = Query(...)):
         lab_path.unlink()
 
     return {"ok": True, "deleted": lab_path.name}
+
+
+# -------------------- Tisch-Keypoint-Labeling --------------------
+
+TABLE_KP_NAMES = ["TL", "TR", "BR", "BL", "Netz-L", "Netz-R"]
+TABLE_KP_COUNT = 6
+
+
+def _table_labels_dir(td: Path) -> Path:
+    return td / "table_labels"
+
+
+def _is_table_label_set(lab_path: Path) -> bool:
+    """True wenn Datei existiert und mindestens einen sichtbaren/geschätzten Keypoint enthält."""
+    try:
+        return bool(lab_path.read_text(encoding="utf-8").strip())
+    except Exception:
+        return False
+
+
+@core.get("/api/task/{task_id:path}/table-label")
+def api_task_get_table_label(task_id: str, filename: str):
+    """Lädt das Tisch-Keypoint-Label für einen Frame."""
+    td = task_dir(task_id)
+    img = (td / "frames" / filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+
+    lab_path = (_table_labels_dir(td) / (Path(filename).stem + ".txt")).resolve()
+    if not lab_path.exists():
+        return {"filename": filename, "label_missing": True, "keypoints": None}
+
+    content = lab_path.read_text(encoding="utf-8", errors="ignore").strip()
+    if not content:
+        return {"filename": filename, "label_missing": False, "no_table": True, "keypoints": None}
+
+    parts = content.split()
+    expected = 5 + TABLE_KP_COUNT * 3  # class cx cy w h + 6*(x y v)
+    if len(parts) < expected:
+        return {"filename": filename, "label_missing": False, "parse_error": True, "keypoints": None}
+
+    keypoints = []
+    for i in range(TABLE_KP_COUNT):
+        base = 5 + i * 3
+        keypoints.append({
+            "x": float(parts[base]),
+            "y": float(parts[base + 1]),
+            "v": int(float(parts[base + 2])),
+        })
+    return {"filename": filename, "label_missing": False, "keypoints": keypoints}
+
+
+@core.post("/api/task/{task_id:path}/table-label")
+def api_task_save_table_label(task_id: str, li: TableLabelIn):
+    """Speichert Tisch-Keypoints im YOLO-Pose-Format."""
+    td = task_dir(task_id)
+    img = (td / "frames" / li.filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+    if len(li.keypoints) != TABLE_KP_COUNT:
+        raise HTTPException(400, f"Genau {TABLE_KP_COUNT} Keypoints erwartet")
+
+    lab_dir = _table_labels_dir(td)
+    lab_dir.mkdir(exist_ok=True)
+    lab_path = (lab_dir / (Path(li.filename).stem + ".txt")).resolve()
+
+    # Bounding-Box nur aus sichtbaren/geschätzten Keypoints (v >= 1)
+    visible = [kp for kp in li.keypoints if kp.v >= 1]
+    if not visible:
+        # Kein Tisch im Frame → leere Datei (Negativ-Beispiel)
+        lab_path.write_text("", encoding="utf-8")
+        return {"ok": True, "no_table": True}
+
+    xs = [kp.x for kp in visible]
+    ys = [kp.y for kp in visible]
+    cx = min(max((min(xs) + max(xs)) / 2, 0.0), 1.0)
+    cy = min(max((min(ys) + max(ys)) / 2, 0.0), 1.0)
+    w  = min(max(max(xs) - min(xs),       0.0), 1.0)
+    h  = min(max(max(ys) - min(ys),       0.0), 1.0)
+
+    kp_str = " ".join(
+        f"{kp.x:.6f} {kp.y:.6f} {kp.v}" for kp in li.keypoints
+    )
+    line = f"0 {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {kp_str}\n"
+    lab_path.write_text(line, encoding="utf-8")
+    return {"ok": True, "saved": lab_path.name}
+
+
+@core.delete("/api/task/{task_id:path}/table-label")
+def api_task_delete_table_label(task_id: str, filename: str = Query(...)):
+    """Löscht das Tisch-Keypoint-Label eines Frames."""
+    td = task_dir(task_id)
+    img = (td / "frames" / filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+    lab_path = (_table_labels_dir(td) / (Path(filename).stem + ".txt")).resolve()
+    if lab_path.exists():
+        lab_path.unlink()
+    return {"ok": True}
+
+
+@core.get("/api/task/{task_id:path}/table-frames-status")
+def api_task_table_frames_status(task_id: str):
+    """Alle Frames mit Tisch-Label-Status: 'labeled', 'no_table', 'none'."""
+    td = task_dir(task_id)
+    frames = list_frames(task_id)
+    labels_dir = _table_labels_dir(td)
+
+    result = []
+    stats = {"labeled": 0, "no_table": 0, "none": 0}
+    for filename in frames:
+        lab = labels_dir / f"{Path(filename).stem}.txt"
+        if not lab.exists():
+            status = "none"
+        elif _is_table_label_set(lab):
+            status = "labeled"
+        else:
+            status = "no_table"
+        stats[status] += 1
+        result.append({"filename": filename, "status": status})
+
+    return {"task_id": task_id, "frames": result, "stats": stats}
+
+
+@core.get("/api/task/{task_id:path}/export-table-yolo")
+def api_task_export_table_yolo(
+    task_id: str,
+    val_fraction: float = Query(0.2, ge=0.05, le=0.5),
+    seed: int = Query(42),
+):
+    """ZIP mit YOLO-Pose-Labels für Tisch-Erkennung (6 Keypoints)."""
+    td = task_dir(task_id)
+    frames_dir = td / "frames"
+    labels_dir = _table_labels_dir(td)
+
+    if not frames_dir.is_dir() or not labels_dir.is_dir():
+        raise HTTPException(400, "Keine Tisch-Labels vorhanden")
+
+    pairs = []
+    for lf in sorted(labels_dir.glob("*.txt")):
+        if not _is_table_label_set(lf):
+            continue
+        img = frames_dir / f"{lf.stem}.jpg"
+        if img.exists():
+            pairs.append((img, lf))
+
+    if not pairs:
+        raise HTTPException(400, "Keine gelabelten Tisch-Frames gefunden")
+
+    rng = random.Random(seed)
+    shuffled = pairs.copy()
+    rng.shuffle(shuffled)
+    n_val = max(1, int(len(shuffled) * val_fraction))
+    val_p, train_p = shuffled[:n_val], shuffled[n_val:]
+
+    tmp = Path(tempfile.mkdtemp(prefix="table_export_"))
+    zip_path = tmp / f"table-keypoints-{slugify(task_id, 'task')}.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for split_name, plist in (("train", train_p), ("val", val_p)):
+            for img_p, lab_p in plist:
+                zf.write(img_p, arcname=f"images/{split_name}/{img_p.name}")
+                zf.write(lab_p, arcname=f"labels/{split_name}/{lab_p.name}")
+        dataset_yaml = (
+            "path: .\n"
+            "train: images/train\n"
+            "val: images/val\n"
+            "nc: 1\n"
+            "names: ['table']\n"
+            "kpt_shape: [6, 3]  # TL TR BR BL Netz-L Netz-R; (x, y, visibility)\n"
+        )
+        zf.writestr("dataset.yaml", dataset_yaml)
+
+    return FileResponse(path=str(zip_path), filename=zip_path.name, media_type="application/zip")
 
 
 # -------------------- Export ZIP (YOLO-Struktur) --------------------
