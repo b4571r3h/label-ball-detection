@@ -17,10 +17,10 @@
 
   // ---- Keypoint-Definitionen ----
   const KP_DEFS = [
-    { name: "1", long: "Nahe linke Tischkante (unten links)",     color: "#22c55e", group: "table" },
-    { name: "2", long: "Nahe rechte Tischecke (unten rechts)",    color: "#22c55e", group: "table" },
-    { name: "3", long: "Entfernte rechte Tischecke (oben rechts)",color: "#22c55e", group: "table" },
-    { name: "4", long: "Entfernte linke Tischecke (oben links)",  color: "#22c55e", group: "table" },
+    { name: "Nahe L",  long: "Nahe linke Tischkante (unten links)",     color: "#22c55e", group: "table" },
+    { name: "Nahe R",  long: "Nahe rechte Tischecke (unten rechts)",    color: "#22c55e", group: "table" },
+    { name: "Fern R",  long: "Entfernte rechte Tischecke (oben rechts)",color: "#22c55e", group: "table" },
+    { name: "Fern L",  long: "Entfernte linke Tischecke (oben links)",  color: "#22c55e", group: "table" },
     { name: "Netz L", long: "Netz Links",  color: "#22d3ee", group: "net"   },
     { name: "Netz R", long: "Netz Rechts", color: "#22d3ee", group: "net"   },
   ];
@@ -200,6 +200,7 @@
       const item = document.createElement("div");
       item.className = "kp-item" + (i === activeKp ? " active" : "");
       item.dataset.kp = i;
+      item.title = def.long;
 
       // Number badge
       const num = document.createElement("span");
