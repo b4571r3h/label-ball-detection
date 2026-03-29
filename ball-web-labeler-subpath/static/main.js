@@ -501,7 +501,28 @@
     frameImg.onload = () => {
       setLabelStatus(`Frame ${frameId}/${totalFrames} (${filename})`);
       updateFsFrameInfo();
+      showSavedLabel(filename);
     };
+  }
+
+  /** Lädt gespeichertes Label und zeigt den Kreis (ohne Flash). */
+  async function showSavedLabel(filename) {
+    try {
+      const r = await fetch(API(`/api/task/${currentTaskId}/label?filename=${encodeURIComponent(filename)}`));
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!d.has_ball || !d.boxes || d.boxes.length === 0) return;
+      const b = d.boxes[0];
+      const left = b.cx * frameImg.clientWidth;
+      const top  = b.cy * frameImg.clientHeight;
+      const dia  = Math.max(b.w, b.h) * frameImg.clientWidth;
+      crosshair.style.width   = `${Math.max(14, dia)}px`;
+      crosshair.style.height  = `${Math.max(14, dia)}px`;
+      crosshair.style.left    = `${left}px`;
+      crosshair.style.top     = `${top}px`;
+      crosshair.style.display = "block";
+      crosshair.classList.remove("ring-flash");
+    } catch (_) { /* ignorieren */ }
   }
 
   async function saveBallLabel(x, y) {
