@@ -507,22 +507,28 @@
 
   /** Lädt gespeichertes Label und zeigt den Kreis (ohne Flash). */
   async function showSavedLabel(filename) {
+    const taskAtStart = currentTaskId;
+    const frameAtStart = currentFrameId;
     try {
-      const r = await fetch(API(`/api/task/${currentTaskId}/label?filename=${encodeURIComponent(filename)}`));
+      const r = await fetch(API(`/api/task/${encodeURIComponent(taskAtStart)}/label?filename=${encodeURIComponent(filename)}`));
       if (!r.ok) return;
       const d = await r.json();
+      // Frame wurde inzwischen gewechselt → nichts anzeigen
+      if (currentFrameId !== frameAtStart || currentTaskId !== taskAtStart) return;
       if (!d.has_ball || !d.boxes || d.boxes.length === 0) return;
       const b = d.boxes[0];
-      const left = b.cx * frameImg.clientWidth;
-      const top  = b.cy * frameImg.clientHeight;
-      const dia  = Math.max(b.w, b.h) * frameImg.clientWidth;
-      crosshair.style.width   = `${Math.max(14, dia)}px`;
-      crosshair.style.height  = `${Math.max(14, dia)}px`;
-      crosshair.style.left    = `${left}px`;
-      crosshair.style.top     = `${top}px`;
+      const W = frameImg.clientWidth || frameImg.naturalWidth;
+      const H = frameImg.clientHeight || frameImg.naturalHeight;
+      if (!W || !H) return;
+      crosshair.style.width   = `${Math.max(14, Math.max(b.w, b.h) * W)}px`;
+      crosshair.style.height  = `${Math.max(14, Math.max(b.w, b.h) * W)}px`;
+      crosshair.style.left    = `${b.cx * W}px`;
+      crosshair.style.top     = `${b.cy * H}px`;
       crosshair.style.display = "block";
       crosshair.classList.remove("ring-flash");
-    } catch (_) { /* ignorieren */ }
+    } catch (e) {
+      console.error("showSavedLabel error:", e);
+    }
   }
 
   async function saveBallLabel(x, y) {
