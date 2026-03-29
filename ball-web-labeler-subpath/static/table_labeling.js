@@ -188,6 +188,61 @@
       ctx.textBaseline = "middle";
       ctx.fillText(String(activeKp + 1), cx, cy);
     }
+
+    // --- Magnifier ---
+    if (mouseNorm && frameImg.naturalWidth) {
+      const MAG_R  = 72;   // Lupen-Radius in Canvas-Pixeln
+      const ZOOM   = 4;    // Vergrößerungsfaktor
+      const imgW   = frameImg.naturalWidth;
+      const imgH   = frameImg.naturalHeight;
+      // Quell-Ausschnitt (in Bild-Pixeln): so viele Pixel um den Cursor wie nötig
+      const srcHW  = (MAG_R / ZOOM) * (imgW / W);
+      const srcHH  = (MAG_R / ZOOM) * (imgH / H);
+      const srcX   = mouseNorm.x * imgW - srcHW;
+      const srcY   = mouseNorm.y * imgH - srcHH;
+
+      // Lupen-Mittelpunkt: versetzt vom Cursor, immer innerhalb des Canvas
+      const curX = mouseNorm.x * W;
+      const curY = mouseNorm.y * H;
+      const offX = curX < W * 0.5 ? MAG_R + 30 : -(MAG_R + 30);
+      const offY = curY < H * 0.5 ? MAG_R + 30 : -(MAG_R + 30);
+      const mx = Math.max(MAG_R + 6, Math.min(W - MAG_R - 6, curX + offX));
+      const my = Math.max(MAG_R + 6, Math.min(H - MAG_R - 6, curY + offY));
+
+      // Clip auf Kreis, Bild zeichnen
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(mx, my, MAG_R, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(
+        frameImg,
+        srcX, srcY, srcHW * 2, srcHH * 2,          // Quelle
+        mx - MAG_R, my - MAG_R, MAG_R * 2, MAG_R * 2 // Ziel
+      );
+      ctx.restore();
+
+      // Rand
+      ctx.beginPath();
+      ctx.arc(mx, my, MAG_R, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.75)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Fadenkreuz in Farbe des aktiven Keypoints
+      const kpColor = KP_DEFS[activeKp].color;
+      ctx.strokeStyle = kpColor;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(mx - 14, my); ctx.lineTo(mx + 14, my);
+      ctx.moveTo(mx, my - 14); ctx.lineTo(mx, my + 14);
+      ctx.stroke();
+
+      // Kleiner Punkt in der Mitte
+      ctx.beginPath();
+      ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = kpColor;
+      ctx.fill();
+    }
   }
 
   // ---- Keypoint panel ----
