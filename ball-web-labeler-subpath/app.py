@@ -50,6 +50,7 @@ import tempfile
 import random
 import asyncio
 import hashlib
+import subprocess
 import datetime as dt
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -220,7 +221,7 @@ def extract_frames(
     max_width: int = 1280,
     jpeg_quality: int = 85,
 ) -> int:
-    """Extrahiert Frames mit OpenCV (keine ffmpeg-Abhängigkeit).
+    """Extrahiert Frames via system-ffmpeg (unterstützt H264, VP9, AV1 etc.).
 
     Args:
         video_path:           Pfad zum Video
@@ -234,88 +235,37 @@ def extract_frames(
                               95 wäre OpenCV-Default, 85 spart ~30 % Größe
                               bei kaum sichtbarem Qualitätsverlust.
     """
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise HTTPException(400, f"Kann Video nicht öffnen: {video_path.name}")
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    native_fps = cap.get(cv2.CAP_PROP_FPS)
+    # Video-Filter: FPS begrenzen + Breite auf max_width beschneiden (kein Upscale)
+    vf = f"fps={fps}"
+    if max_width > 0:
+        vf += f",scale='min(iw,{max_width}):-2'"
+
+    # ffmpeg q:v: 2 = beste Qualität, 31 = schlechteste
+    ffmpeg_q = max(2, min(31, round(2 + (100 - jpeg_quality) * 29 / 100)))
+
+    out_pattern = str(out_dir / "%06d.jpg")
+    cmd = [
+        "ffmpeg", "-y",
+        "-t", str(max_duration_seconds),
+        "-i", str(video_path),
+        "-vf", vf,
+        "-q:v", str(ffmpeg_q),
+        "-start_number", "1",
+        out_pattern,
+    ]
+    print(f"extract_frames: {' '.join(cmd)}")
     try:
-        native_fps = float(native_fps)
-    except Exception:
-        native_fps = 0.0
-    if not native_fps or native_fps <= 0:
-        native_fps = 25.0
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            print(f"ffmpeg stderr (last 1000 chars): {result.stderr[-1000:]}")
+            raise HTTPException(500, f"ffmpeg frame-extraction fehlgeschlagen (exit {result.returncode})")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(500, "ffmpeg: Timeout nach 600 s")
 
-    # OpenCV liefert bei manchen Videos (häufig vom YouTube-Download) Frame-Count/Duration nicht zuverlässig.
-    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    try:
-        total_frames = int(total_frames)
-    except Exception:
-        total_frames = 0
-
-    video_duration = (total_frames / native_fps) if total_frames > 0 else 0.0
-
-    # Sampling-Rate (in Frames)
-    step = max(int(round(native_fps / max(1, fps))), 1)
-
-    # Stop-Kriterium:
-    # - Wenn Frame-Count bekannt ist -> frame_limit
-    # - Sonst -> time_limit (per CAP_PROP_POS_MSEC bzw. Fallback idx/native_fps)
-    if total_frames > 0:
-        max_frames = int(native_fps * max_duration_seconds)
-        actual_frames = min(total_frames, max_frames)
-        actual_duration = actual_frames / native_fps
-        stop_mode = "frame_limit"
-    else:
-        actual_frames = 0
-        actual_duration = float(max_duration_seconds)
-        stop_mode = "time_limit"
-
-    print(
-        f"Video Info: duration={video_duration:.1f}s frame_count={total_frames} "
-        f"stop_mode={stop_mode}, processing first ~{actual_duration:.1f}s (step={step})"
-    )
-
-    idx = 0
-    saved = 0
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-
-        if stop_mode == "frame_limit" and idx >= actual_frames:
-            break
-
-        if idx % step == 0:
-            if max_width > 0:
-                h, w = frame.shape[:2]
-                if w > max_width:
-                    scale = max_width / w
-                    frame = cv2.resize(
-                        frame,
-                        (max_width, int(h * scale)),
-                        interpolation=cv2.INTER_AREA,
-                    )
-            out = out_dir / f"{saved + 1:06d}.jpg"
-            cv2.imwrite(str(out), frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
-            saved += 1
-
-        idx += 1
-
-        if stop_mode == "time_limit":
-            # Zeit anhand der Decoder-Position bestimmen (falls verfügbar)
-            pos_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
-            elapsed_s = None
-            try:
-                elapsed_s = float(pos_msec) / 1000.0
-            except Exception:
-                elapsed_s = None
-            if not elapsed_s or elapsed_s <= 0:
-                elapsed_s = idx / native_fps
-            if elapsed_s > max_duration_seconds:
-                break
-
-    cap.release()
+    saved = len(sorted(out_dir.glob("*.jpg")))
+    print(f"extract_frames: {saved} Frames gespeichert")
     return saved
 
 
@@ -330,7 +280,9 @@ def download_youtube(url: str) -> Path:
     outtmpl = str(tmpdir / "%(title).200s.%(ext)s")
     ydl_opts = {
         "outtmpl": outtmpl,
-        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+        # Bevorzuge H264/mp4 (OpenCV-kompatibel); Fallback auf beliebiges Format
+        "format": "bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best",
+        "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
