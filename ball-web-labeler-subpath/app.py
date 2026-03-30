@@ -1484,7 +1484,8 @@ def api_task_export_table_yolo(
             "val: images/val\n"
             "nc: 1\n"
             "names: ['table']\n"
-            "kpt_shape: [6, 3]  # TL TR BR BL Netz-L Netz-R; (x, y, visibility)\n"
+            "kpt_shape: [6, 3]  # Nahe-L Nahe-R Fern-R Fern-L Netz-L Netz-R; (x, y, visibility)\n"
+            "flip_idx: [1, 0, 3, 2, 5, 4]  # Spiegelung: Nahe-L<->Nahe-R, Fern-R<->Fern-L, Netz-L<->Netz-R\n"
         )
         zf.writestr("dataset.yaml", dataset_yaml)
 
