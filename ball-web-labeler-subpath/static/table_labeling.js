@@ -63,6 +63,7 @@
   let activeKp  = 0;   // 0–5: which keypoint next click will set
   let mouseNorm = null; // {x,y} in normalized coords, for cursor guide
   let busy = false;
+  let lastLabeledKps = null; // letzte gespeicherte Keypoints für Übernahme
 
   function setStatus(msg, isErr = false) {
     statusMsg.textContent = msg;
@@ -392,18 +393,17 @@
     const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/table-label?filename=${encodeURIComponent(filename)}`));
     if (!r.ok) { buildKpPanel(); render(); return; }
     const d = await r.json();
-    if (d.keypoints && Array.isArray(d.keypoints)) {
+    if (d.label_missing && lastLabeledKps) {
+      // Neuer Frame, noch kein Label → Keypoints vom letzten gelabelten Frame übernehmen
+      keypoints = lastLabeledKps.map(kp => ({ ...kp }));
+      activeKp  = 0;
+      setStatus("↩ Keypoints vom letzten Frame übernommen – bitte prüfen & ggf. anpassen.");
+    } else if (d.keypoints && Array.isArray(d.keypoints)) {
       for (let i = 0; i < 6 && i < d.keypoints.length; i++) {
         const kp = d.keypoints[i];
-        // Treat v=0 with x=0,y=0 as "not in frame" vs "unset"
-        // If the label exists and v=0 → explicitly marked as not in frame
         keypoints[i] = { x: kp.x, y: kp.y, v: kp.v };
       }
-      // Set activeKp to first null/v=0 that hasn't been explicitly set… actually
-      // if we loaded an existing label, all 6 are set → find first v=0 to re-set
-      activeKp = keypoints.findIndex(kp => kp && kp.v >= 1) >= 0
-        ? 0
-        : 0;
+      activeKp = 0;
     }
     // Update frame status in allFrames
     const entry = allFrames.find(f => f.filename === filename);
@@ -502,6 +502,8 @@
       const hasAny = keypoints.some(kp => kp && kp.v >= 1);
       const entry  = allFrames.find(f => f.filename === filename);
       if (entry) { entry.status = hasAny ? "labeled" : "no_table"; updateStats(); }
+      // Keypoints für nächsten Frame merken (nur wenn echter Tisch markiert wurde)
+      if (hasAny) lastLabeledKps = keypoints.map(kp => ({ ...kp }));
       setStatus(d.no_table ? "○ Kein Tisch gespeichert." : "✅ Gespeichert.");
       // If filtered and frame no longer matches → recompute
       if (currentFilter !== "all") {
