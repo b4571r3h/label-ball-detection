@@ -63,7 +63,6 @@
   let filteredFrames  = [];
   let currentFilter   = "all";
   let currentIndex    = 0;
-  let pendingClick    = null; // {filename, cx, cy} in natürlichen Bildpixeln
   let busy            = false; // verhindert parallele API-Calls
 
   // ---- Status-Anzeige ----
@@ -98,7 +97,6 @@
       frameImg.src = "";
       labelOverlay.innerHTML = "";
       crosshair.style.display = "none";
-      pendingClick = null;
       updateNav();
       setStatus(`Keine Frames für diesen Filter.`);
     }
@@ -188,22 +186,9 @@
   }
 
   // ---- Crosshair ----
-  function showCrosshairAt(clientX, clientY) {
-    const br  = imgBox.getBoundingClientRect();
-    const dia = Math.max(14, Math.min(120, parseFloat(boxSizeInput.value) || 24));
-    crosshair.style.display = "block";
-    crosshair.style.width   = `${dia}px`;
-    crosshair.style.height  = `${dia}px`;
-    crosshair.style.left    = `${clientX - br.left}px`;
-    crosshair.style.top     = `${clientY - br.top}px`;
-  }
-
   // ---- Aktionen ----
   async function actionOk() {
     if (busy || !currentTaskId || filteredFrames.length === 0) return;
-    if (pendingClick) {
-      await savePendingClick();
-    }
     advance();
   }
 
@@ -269,15 +254,13 @@
     } finally { busy = false; }
   }
 
-  async function savePendingClick() {
-    if (!pendingClick) return;
+  async function saveClickAt(filename, cx, cy) {
+    if (busy) return;
     busy = true;
-    const { filename, cx, cy } = pendingClick;
     const nw    = frameImg.naturalWidth;
     const cw    = frameImg.clientWidth;
     const boxPx = Math.max(2, (parseFloat(boxSizeInput.value) || 24) * (nw / cw));
-
-    setStatus("Speichere Ball-Position…");
+    setStatus("Speichere…");
     try {
       const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label`), {
         method: "POST",
@@ -285,13 +268,10 @@
         body: JSON.stringify({ filename, cx, cy, box: boxPx }),
       });
       if (!r.ok) { setStatus(`Fehler: ${await errorText(r)}`, true); return; }
-
-      pendingClick = null;
-      crosshair.style.display = "none";
       const entry = allFrames.find(f => f.filename === filename);
       if (entry) entry.status = "ball";
       updateStats();
-      setStatus("✅ Label gespeichert.");
+      setStatus("✅ Gespeichert. Enter = weiter.");
       await refreshLabel(filename);
     } finally { busy = false; }
   }
@@ -401,9 +381,9 @@
   btnNoball.addEventListener("click", () => void actionNoball());
   btnDelete.addEventListener("click", () => void actionDelete());
 
-  // Klick auf Bild → neue Ball-Position
+  // Klick auf Bild → sofort speichern und grünen Kreis zeigen
   frameImg.addEventListener("click", e => {
-    if (!currentTaskId || filteredFrames.length === 0) return;
+    if (!currentTaskId || filteredFrames.length === 0 || busy) return;
     const filename = filteredFrames[currentIndex]?.filename;
     if (!filename) return;
     const nw = frameImg.naturalWidth, nh = frameImg.naturalHeight;
@@ -412,17 +392,7 @@
     const rect = frameImg.getBoundingClientRect();
     const cx = ((e.clientX - rect.left) / cw) * nw;
     const cy = ((e.clientY - rect.top)  / ch) * nh;
-    pendingClick = { filename, cx, cy };
-    showCrosshairAt(e.clientX, e.clientY);
-    setStatus("Neue Position gesetzt (gelber Kreis). Enter oder OK zum Speichern.");
-  });
-
-  // Crosshair-Position aktualisieren wenn Maus bewegt und pendingClick gesetzt
-  imgBox.addEventListener("mousemove", e => {
-    if (pendingClick) showCrosshairAt(e.clientX, e.clientY);
-  });
-  imgBox.addEventListener("mouseleave", () => {
-    if (!pendingClick) crosshair.style.display = "none";
+    void saveClickAt(filename, cx, cy);
   });
 
   // Keyboard-Shortcuts
