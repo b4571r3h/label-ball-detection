@@ -61,8 +61,8 @@ jobs:
         script: |
           cd /root/tt-apps
           git pull origin main
-          # Nur Images mit Registry ziehen (ball-analyzer:fixed bleibt lokal)
+          # Nur bekannte Images ziehen (ball-analyzer:fixed und dev-spinevo bleiben außen vor)
           docker compose -f compose.ionos.yaml pull ball-labeler ball-admin caddy
-          docker compose -f compose.ionos.yaml down
-          docker compose -f compose.ionos.yaml up -d --force-recreate
+          # Nur diese Services neu starten (dev-spinevo hat eigenen Deploy-Workflow)
+          docker compose -f compose.ionos.yaml up -d --force-recreate ball-labeler ball-admin ball-analyzer caddy
           docker system prune -f
