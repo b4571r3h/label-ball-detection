@@ -43,6 +43,15 @@ services:
       - ./ball-web-analyzer/data:/data/analyzer
     restart: unless-stopped
 
+  # SpinEvo Dev (dev.spinevo.app)
+  dev-spinevo:
+    image: ghcr.io/sreh/spinevo:latest
+    container_name: tt-dev-spinevo
+    environment:
+      - SUPABASE_SERVICE_ROLE_KEY=${SPINEVO_SERVICE_ROLE_KEY}
+      - MODAL_TOKEN=${SPINEVO_MODAL_TOKEN}
+    restart: unless-stopped
+
   # Reverse Proxy (kombiniert beide Apps)
   caddy:
     image: caddy:2-alpine

@@ -42,5 +42,11 @@ balls.spinevo.app {
     reverse_proxy tt-ball-labeler:8000
 }
 
+# SpinEvo Dev (dev.spinevo.app)
+# DNS: Subdomain dev.spinevo.app → A/AAAA auf dieselbe Server-IP.
+dev.spinevo.app {
+    reverse_proxy tt-dev-spinevo:3000
+}
+
 # HTTP zu HTTPS Redirect (automatisch von Caddy)
 # Caddy leitet automatisch HTTP-Traffic zu HTTPS um
