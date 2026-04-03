@@ -473,8 +473,9 @@ def api_tasks():
                 continue
             rel = str(t.relative_to(DATA_DIR))
             frames = len(list((t / "frames").glob("*.jpg")))
+            labeled = len(list((t / "labels").glob("*.txt"))) if (t / "labels").exists() else 0
             meta = read_meta(t)
-            tasks.append({"id": rel, "frames": frames, "meta": meta})
+            tasks.append({"id": rel, "frames": frames, "labeled": labeled, "unlabeled": max(0, frames - labeled), "meta": meta})
     return {"tasks": tasks}
 
 

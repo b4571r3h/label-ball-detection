@@ -317,7 +317,9 @@
     for (const t of tasks) {
       const opt = document.createElement("option");
       opt.value = t.id;
-      opt.textContent = `${t.id}  (${(t.frames || 0).toLocaleString("de-DE")} Frames)`;
+      const frames    = (t.frames    || 0).toLocaleString("de-DE");
+      const unlabeled = (t.unlabeled || 0).toLocaleString("de-DE");
+      opt.textContent = `${t.id}  (${frames} Frames, ${unlabeled} offen)`;
       taskSelect.appendChild(opt);
     }
   }
