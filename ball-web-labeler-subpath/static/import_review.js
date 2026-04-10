@@ -28,8 +28,9 @@
   const labelBadge   = document.getElementById("labelBadge");
   const filenameInfo = document.getElementById("filenameInfo");
   const boxSizeInput = document.getElementById("boxSize");
-  const btnOk        = document.getElementById("btnOk");
-  const btnNoball    = document.getElementById("btnNoball");
+  const btnOk          = document.getElementById("btnOk");
+  const btnNoball      = document.getElementById("btnNoball");
+  const btnResetEmpty  = document.getElementById("btnResetEmpty");
   const statusMsg    = document.getElementById("statusMsg");
   const filterTabs   = document.querySelectorAll(".tab[data-filter]");
   const splitBtns    = document.querySelectorAll(".split-btn[data-split]");
@@ -271,6 +272,16 @@
 
   btnOk.addEventListener("click",     () => advance());
   btnNoball.addEventListener("click", () => void actionNoball());
+
+  btnResetEmpty?.addEventListener("click", async () => {
+    if (!confirm("Alle leeren .txt-Dateien löschen?\n\nFrames wechseln von 'Kein Ball (leer)' zu 'kein Label'.\nNur leere Dateien werden gelöscht – Ball-Labels bleiben erhalten.")) return;
+    const r = await fetch(API("/api/import-yolo/reset-empty-labels"), { method: "POST" });
+    if (!r.ok) { setStatus("Fehler beim Zurücksetzen.", true); return; }
+    const d = await r.json();
+    setStatus(`✓ ${d.deleted} leere Label-Dateien gelöscht. Liste wird neu geladen…`);
+    await loadStats();
+    await loadFrameList();
+  });
 
   document.addEventListener("keydown", e => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;

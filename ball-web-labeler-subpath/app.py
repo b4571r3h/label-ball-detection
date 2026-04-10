@@ -1147,7 +1147,7 @@ def api_import_yolo_label_save(body: ImportLabelSave):
 
 @core.delete("/api/import-yolo/label")
 def api_import_yolo_label_delete(split: str, filename: str):
-    """Setzt ein Label zurück auf 'leer' (leere .txt)."""
+    """Setzt ein Label auf 'leer' (leere .txt) – explizit 'Kein Ball' bestätigt."""
     root = IMPORT_YOLO_BALL_DIR
     if not root or not root.is_dir():
         raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")
@@ -1155,9 +1155,31 @@ def api_import_yolo_label_delete(split: str, filename: str):
         raise HTTPException(400, "Ungültiger split.")
     safe = Path(filename).name
     lbl = root / "labels" / split / (Path(safe).stem + ".txt")
-    if lbl.exists():
-        lbl.write_text("")
+    lbl.parent.mkdir(parents=True, exist_ok=True)
+    lbl.write_text("")
     return {"ok": True}
+
+
+@core.post("/api/import-yolo/reset-empty-labels")
+def api_import_yolo_reset_empty_labels():
+    """
+    Löscht alle leeren .txt-Dateien aus IMPORT_YOLO_BALL_DIR/labels/{train,val}.
+    Frames wechseln dadurch von 'empty' (Kein Ball) zu 'none' (kein Label).
+    Nur leere Dateien werden gelöscht – Dateien mit Ball-Labels bleiben unberührt.
+    """
+    root = IMPORT_YOLO_BALL_DIR
+    if not root or not root.is_dir():
+        raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")
+    deleted = 0
+    for split in ("train", "val"):
+        lbl_dir = root / "labels" / split
+        if not lbl_dir.is_dir():
+            continue
+        for lbl in lbl_dir.glob("*.txt"):
+            if lbl.stat().st_size == 0:
+                lbl.unlink()
+                deleted += 1
+    return {"ok": True, "deleted": deleted}
 
 
 @core.get("/api/export/import-yolo-zip")

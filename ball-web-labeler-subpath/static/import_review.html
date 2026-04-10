@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Import-Datensatz Review</title>
-  <script defer src="static/import_review.js?v=2"></script>
+  <script defer src="static/import_review.js?v=3"></script>
   <style>
     :root {
       --bg: #0f172a; --card: #111827; --border: #1f2937; --muted: #94a3b8;
@@ -66,6 +66,8 @@
 
     #statusMsg { min-height: 18px; font-size: 13px; color: var(--muted); margin-top: 8px; }
     #loadingMsg { font-size: 13px; color: var(--muted); }
+    .btn-danger { background: #450a0a; border-color: #7f1d1d; color: #fca5a5; }
+    .btn-danger:hover:not(:disabled) { background: #7f1d1d; }
   </style>
 </head>
 <body>
@@ -101,6 +103,9 @@
         <div><div class="stat-count" id="sNone">0</div><div class="stat-label">kein Label</div></div>
       </div>
       <div class="stat-total" id="sTotal"></div>
+      <button class="btn btn-danger" id="btnResetEmpty" style="margin-left:auto;" title="Löscht alle leeren .txt-Dateien – Frames wechseln von 'Kein Ball' zu 'kein Label'">
+        ⚠ Leere Labels zurücksetzen
+      </button>
     </div>
   </div>
 
