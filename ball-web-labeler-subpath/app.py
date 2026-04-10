@@ -414,6 +414,12 @@ def table_labeling_html():
     return FileResponse(str(STATIC_DIR / "table_labeling.html"))
 
 
+@core.get("/import-review", include_in_schema=False)
+def import_review_html():
+    """Review-Seite für IMPORT_YOLO_BALL_DIR (read-only Kontrolle)."""
+    return FileResponse(str(STATIC_DIR / "import_review.html"))
+
+
 @core.get("/api/health")
 def api_health():
     return {"status": "ok"}
@@ -969,6 +975,122 @@ def _zip_import_yolo_root(root: Path) -> Path:
         )
 
     return zip_path
+
+
+# ── Import-YOLO Review (Browse Import-Datensatz) ─────────────────────────────
+
+@core.get("/api/import-yolo/frames")
+def api_import_yolo_frames(split: str = "train", filter: str = "all"):
+    """
+    Listet Frames aus IMPORT_YOLO_BALL_DIR auf.
+    split: train|val
+    filter: all|ball|empty|none
+    Gibt [{filename, status, split}] zurück. Status: ball|empty|none.
+    """
+    root = IMPORT_YOLO_BALL_DIR
+    if not root or not root.is_dir():
+        raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt oder nicht gefunden.")
+    if split not in ("train", "val"):
+        raise HTTPException(400, "split muss 'train' oder 'val' sein.")
+
+    img_dir = root / "images" / split
+    lbl_dir = root / "labels" / split
+    if not img_dir.is_dir():
+        return {"frames": [], "split": split}
+
+    frames = []
+    for img in sorted(img_dir.iterdir()):
+        if img.suffix.lower() not in IMPORT_YOLO_IMG_EXT:
+            continue
+        lbl = lbl_dir / (img.stem + ".txt")
+        if not lbl.exists():
+            status = "none"
+        elif lbl.stat().st_size == 0:
+            status = "empty"
+        else:
+            status = "ball"
+        if filter == "all" or filter == status:
+            frames.append({"filename": img.name, "status": status, "split": split})
+
+    return {"frames": frames, "split": split, "total": len(frames)}
+
+
+@core.get("/api/import-yolo/frame/{split}/{filename}")
+def api_import_yolo_frame(split: str, filename: str):
+    """Liefert ein einzelnes Bild aus IMPORT_YOLO_BALL_DIR."""
+    root = IMPORT_YOLO_BALL_DIR
+    if not root or not root.is_dir():
+        raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")
+    if split not in ("train", "val"):
+        raise HTTPException(400, "Ungültiger split.")
+    # Pfad-Traversal verhindern
+    safe = Path(filename).name
+    img_path = root / "images" / split / safe
+    if not img_path.is_file():
+        raise HTTPException(404, "Frame nicht gefunden.")
+    return FileResponse(str(img_path))
+
+
+@core.get("/api/import-yolo/label")
+def api_import_yolo_label(split: str = "train", filename: str = ""):
+    """
+    Gibt den Label-Inhalt für einen Frame zurück.
+    Antwort: {status: ball|empty|none, boxes: [{cx,cy,w,h,cls}]}
+    """
+    root = IMPORT_YOLO_BALL_DIR
+    if not root or not root.is_dir():
+        raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")
+    if split not in ("train", "val"):
+        raise HTTPException(400, "Ungültiger split.")
+    safe = Path(filename).name
+    lbl = root / "labels" / split / (Path(safe).stem + ".txt")
+    if not lbl.exists():
+        return {"status": "none", "boxes": []}
+    text = lbl.read_text().strip()
+    if not text:
+        return {"status": "empty", "boxes": []}
+    boxes = []
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 5:
+            try:
+                boxes.append({
+                    "cls": int(parts[0]),
+                    "cx": float(parts[1]),
+                    "cy": float(parts[2]),
+                    "w":  float(parts[3]),
+                    "h":  float(parts[4]),
+                })
+            except ValueError:
+                pass
+    return {"status": "ball" if boxes else "empty", "boxes": boxes}
+
+
+@core.get("/api/import-yolo/stats")
+def api_import_yolo_stats():
+    """Statistik über IMPORT_YOLO_BALL_DIR (ball/empty/none pro split)."""
+    root = IMPORT_YOLO_BALL_DIR
+    if not root or not root.is_dir():
+        return {"enabled": False}
+    result = {"enabled": True, "splits": {}}
+    for split in ("train", "val"):
+        img_dir = root / "images" / split
+        lbl_dir = root / "labels" / split
+        if not img_dir.is_dir():
+            continue
+        ball = empty = none = 0
+        for img in img_dir.iterdir():
+            if img.suffix.lower() not in IMPORT_YOLO_IMG_EXT:
+                continue
+            lbl = lbl_dir / (img.stem + ".txt")
+            if not lbl.exists():
+                none += 1
+            elif lbl.stat().st_size == 0:
+                empty += 1
+            else:
+                ball += 1
+        result["splits"][split] = {"ball": ball, "empty": empty, "none": none, "total": ball + empty + none}
+    return result
 
 
 @core.get("/api/export/import-yolo-zip")
