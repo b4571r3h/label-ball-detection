@@ -1,5 +1,4 @@
 (() => {
-  // ---- Root-Pfad ----
   function detectRoot() {
     if ((window.location.hostname || "") === "balls.spinevo.app") return "";
     const p = window.location.pathname || "/";
@@ -10,37 +9,44 @@
   const API = (path) => `${ROOT}${path.startsWith("/") ? path : "/" + path}`;
 
   // ---- DOM ----
-  const statsWrap   = document.getElementById("statsWrap");
-  const loadingMsg  = document.getElementById("loadingMsg");
-  const reviewCard  = document.getElementById("reviewCard");
-  const sBall       = document.getElementById("sBall");
-  const sEmpty      = document.getElementById("sEmpty");
-  const sNone       = document.getElementById("sNone");
-  const sTotal      = document.getElementById("sTotal");
-  const navInfo     = document.getElementById("navInfo");
-  const btnPrev     = document.getElementById("btnPrev");
-  const btnNext     = document.getElementById("btnNext");
-  const btnRandom   = document.getElementById("btnRandom");
-  const jumpInput   = document.getElementById("jumpInput");
-  const btnJump     = document.getElementById("btnJump");
-  const frameImg    = document.getElementById("frameImg");
-  const labelCanvas = document.getElementById("labelCanvas");
-  const labelBadge  = document.getElementById("labelBadge");
+  const statsWrap    = document.getElementById("statsWrap");
+  const loadingMsg   = document.getElementById("loadingMsg");
+  const reviewCard   = document.getElementById("reviewCard");
+  const sBall        = document.getElementById("sBall");
+  const sEmpty       = document.getElementById("sEmpty");
+  const sNone        = document.getElementById("sNone");
+  const sTotal       = document.getElementById("sTotal");
+  const navInfo      = document.getElementById("navInfo");
+  const btnPrev      = document.getElementById("btnPrev");
+  const btnNext      = document.getElementById("btnNext");
+  const btnRandom    = document.getElementById("btnRandom");
+  const jumpInput    = document.getElementById("jumpInput");
+  const btnJump      = document.getElementById("btnJump");
+  const frameImg     = document.getElementById("frameImg");
+  const labelCanvas  = document.getElementById("labelCanvas");
+  const crosshair    = document.getElementById("crosshair");
+  const labelBadge   = document.getElementById("labelBadge");
   const filenameInfo = document.getElementById("filenameInfo");
-  const statusMsg   = document.getElementById("statusMsg");
-  const filterTabs  = document.querySelectorAll(".tab[data-filter]");
-  const splitBtns   = document.querySelectorAll(".split-btn[data-split]");
+  const boxSizeInput = document.getElementById("boxSize");
+  const btnOk        = document.getElementById("btnOk");
+  const btnNoball    = document.getElementById("btnNoball");
+  const statusMsg    = document.getElementById("statusMsg");
+  const filterTabs   = document.querySelectorAll(".tab[data-filter]");
+  const splitBtns    = document.querySelectorAll(".split-btn[data-split]");
 
   // ---- State ----
-  let currentSplit  = "train";
-  let currentFilter = "all";
-  let allFrames     = [];
+  let currentSplit   = "train";
+  let currentFilter  = "all";
+  let allFrames      = [];
   let filteredFrames = [];
-  let currentIndex  = 0;
-  let statsCache    = {};
+  let currentIndex   = 0;
+  let statsCache     = {};
+  let busy           = false;
 
-  // ---- Helpers ----
-  function setStatus(msg) { statusMsg.textContent = msg; }
+  function setStatus(msg, isError = false) {
+    statusMsg.textContent = msg;
+    statusMsg.style.color = isError ? "#ef4444" : "#94a3b8";
+  }
 
   function updateNav() {
     const total = filteredFrames.length;
@@ -49,7 +55,6 @@
     btnNext.disabled = currentIndex >= total - 1;
   }
 
-  // ---- Stats anzeigen ----
   function showStats(split) {
     const s = statsCache[split];
     if (!s) return;
@@ -60,7 +65,6 @@
     statsWrap.style.display = "flex";
   }
 
-  // ---- Globale Stats laden ----
   async function loadStats() {
     loadingMsg.style.display = "inline";
     const r = await fetch(API("/api/import-yolo/stats"));
@@ -72,7 +76,6 @@
     showStats(currentSplit);
   }
 
-  // ---- Frame-Liste laden ----
   async function loadFrameList() {
     loadingMsg.style.display = "inline";
     reviewCard.style.display = "none";
@@ -86,7 +89,6 @@
     if (allFrames.length === 0) setStatus("Keine Frames gefunden.");
   }
 
-  // ---- Filter ----
   function applyFilter(filter) {
     currentFilter = filter;
     filterTabs.forEach(t => t.classList.toggle("active", t.dataset.filter === filter));
@@ -97,6 +99,7 @@
     } else {
       frameImg.src = "";
       clearCanvas();
+      crosshair.style.display = "none";
       updateNav();
       setStatus("Keine Frames für diesen Filter.");
     }
@@ -123,7 +126,6 @@
       ctx.strokeStyle = "rgba(34,197,94,0.9)";
       ctx.lineWidth = 2.5;
       ctx.strokeRect(x, y, w, h);
-      // Kleiner Mittelpunkt
       ctx.fillStyle = "rgba(34,197,94,0.7)";
       ctx.beginPath();
       ctx.arc(b.cx * W, b.cy * H, 4, 0, Math.PI * 2);
@@ -137,8 +139,9 @@
     currentIndex = index;
     updateNav();
     clearCanvas();
+    crosshair.style.display = "none";
 
-    const { filename, split, status } = filteredFrames[currentIndex];
+    const { filename, split } = filteredFrames[currentIndex];
     filenameInfo.textContent = `${split}/${filename}`;
     labelBadge.textContent = "Lade…";
     labelBadge.className   = "badge badge-none";
@@ -146,23 +149,99 @@
     frameImg.src = API(`/api/import-yolo/frame/${split}/${encodeURIComponent(filename)}`);
     await new Promise(res => { frameImg.onload = res; frameImg.onerror = res; });
 
-    // Label laden
+    await refreshLabel(filename, split);
+  }
+
+  async function refreshLabel(filename, split) {
     const lr = await fetch(API(`/api/import-yolo/label?split=${split}&filename=${encodeURIComponent(filename)}`));
     if (!lr.ok) return;
     const ld = await lr.json();
 
+    crosshair.style.display = "none";
     if (ld.status === "ball") {
       drawBoxes(ld.boxes);
       labelBadge.textContent = `● ${ld.boxes.length} Ball${ld.boxes.length !== 1 ? "s" : ""}`;
       labelBadge.className   = "badge badge-ball";
+      // allFrames-Status aktualisieren
+      const entry = allFrames.find(f => f.filename === filename && f.split === split);
+      if (entry) entry.status = "ball";
     } else if (ld.status === "empty") {
+      clearCanvas();
       labelBadge.textContent = "○ Kein Ball (leere Label-Datei)";
       labelBadge.className   = "badge badge-empty";
     } else {
+      clearCanvas();
       labelBadge.textContent = "? Keine Label-Datei";
       labelBadge.className   = "badge badge-none";
     }
     setStatus("");
+  }
+
+  function advance() {
+    if (currentIndex < filteredFrames.length - 1) {
+      void loadFrame(currentIndex + 1);
+    } else {
+      setStatus("Ende der Liste. ✓");
+    }
+  }
+
+  // ---- Klick auf Bild → Ball markieren ----
+  frameImg.addEventListener("click", e => {
+    if (busy || filteredFrames.length === 0) return;
+    const nw = frameImg.naturalWidth, nh = frameImg.naturalHeight;
+    const cw = frameImg.clientWidth,  ch = frameImg.clientHeight;
+    if (!nw || !nh || !cw || !ch) return;
+    const rect = frameImg.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / cw * nw;  // Pixel in naturalWidth-Raum
+    const py = (e.clientY - rect.top)  / ch * nh;
+
+    // Crosshair anzeigen
+    const boxPx = parseFloat(boxSizeInput.value) || 24;
+    crosshair.style.width  = `${boxPx * (cw / nw)}px`;
+    crosshair.style.height = `${boxPx * (cw / nw)}px`;
+    crosshair.style.left   = `${(px / nw) * cw}px`;
+    crosshair.style.top    = `${(py / nh) * ch}px`;
+    crosshair.style.display = "block";
+
+    void saveLabel(px, py);
+  });
+
+  async function saveLabel(px, py) {
+    if (busy || filteredFrames.length === 0) return;
+    busy = true;
+    const { filename, split } = filteredFrames[currentIndex];
+    const boxPx = parseFloat(boxSizeInput.value) || 24;
+    setStatus("Speichere…");
+    try {
+      const r = await fetch(API("/api/import-yolo/label"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ split, filename, cx: px, cy: py, box: boxPx }),
+      });
+      if (!r.ok) { setStatus("Fehler beim Speichern.", true); return; }
+      setStatus("✅ Gespeichert. Enter = weiter.");
+      await refreshLabel(filename, split);
+    } finally { busy = false; }
+  }
+
+  async function actionNoball() {
+    if (busy || filteredFrames.length === 0) return;
+    busy = true;
+    const { filename, split } = filteredFrames[currentIndex];
+    setStatus("Speichere 'Kein Ball'…");
+    try {
+      const r = await fetch(
+        API(`/api/import-yolo/label?split=${split}&filename=${encodeURIComponent(filename)}`),
+        { method: "DELETE" }
+      );
+      if (!r.ok) { setStatus("Fehler.", true); return; }
+      crosshair.style.display = "none";
+      const entry = allFrames.find(f => f.filename === filename && f.split === split);
+      if (entry) entry.status = "empty";
+      setStatus("○ Als 'Kein Ball' gesetzt.");
+      await refreshLabel(filename, split);
+      advance();
+    } finally { busy = false; }
   }
 
   // ---- Events ----
@@ -190,10 +269,17 @@
   });
   jumpInput.addEventListener("keydown", e => { if (e.key === "Enter") btnJump.click(); });
 
+  btnOk.addEventListener("click",     () => advance());
+  btnNoball.addEventListener("click", () => void actionNoball());
+
   document.addEventListener("keydown", e => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-    if (e.key === "ArrowLeft")  { e.preventDefault(); if (currentIndex > 0) void loadFrame(currentIndex - 1); }
-    if (e.key === "ArrowRight") { e.preventDefault(); if (currentIndex < filteredFrames.length - 1) void loadFrame(currentIndex + 1); }
+    switch (e.key) {
+      case "ArrowLeft":  e.preventDefault(); if (currentIndex > 0) void loadFrame(currentIndex - 1); break;
+      case "ArrowRight": e.preventDefault(); if (currentIndex < filteredFrames.length - 1) void loadFrame(currentIndex + 1); break;
+      case "Enter":      e.preventDefault(); advance(); break;
+      case "n": case "N": e.preventDefault(); void actionNoball(); break;
+    }
   });
 
   // ---- Start ----

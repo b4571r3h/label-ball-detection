@@ -1093,6 +1093,73 @@ def api_import_yolo_stats():
     return result
 
 
+class ImportLabelSave(BaseModel):
+    split:    str   # "train" | "val"
+    filename: str
+    cx:       float  # Pixel-Koordinate relativ zu naturalWidth
+    cy:       float  # Pixel-Koordinate relativ zu naturalHeight
+    box:      float  # Boxgröße in Pixel (naturalWidth-Raum)
+
+
+@core.post("/api/import-yolo/label")
+def api_import_yolo_label_save(body: ImportLabelSave):
+    """Speichert ein Ball-Label im Import-Datensatz (überschreibt bestehende Label-Datei)."""
+    root = IMPORT_YOLO_BALL_DIR
+    if not root or not root.is_dir():
+        raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")
+    if body.split not in ("train", "val"):
+        raise HTTPException(400, "split muss 'train' oder 'val' sein.")
+
+    safe = Path(body.filename).name
+    img_dir = root / "images" / body.split
+    lbl_dir = root / "labels" / body.split
+
+    # Bild muss existieren
+    img_path = None
+    for ext in IMPORT_YOLO_IMG_EXT:
+        p = img_dir / (Path(safe).stem + ext)
+        if p.is_file():
+            img_path = p
+            break
+    if not img_path:
+        raise HTTPException(404, "Frame nicht gefunden.")
+
+    # Bilddimensionen ermitteln
+    try:
+        with Image.open(img_path) as im:
+            W, H = im.size
+    except Exception:
+        raise HTTPException(500, "Bild konnte nicht geöffnet werden.")
+
+    # YOLO-Koordinaten berechnen (normalisiert 0-1)
+    cx_n = max(0.0, min(1.0, body.cx / W))
+    cy_n = max(0.0, min(1.0, body.cy / H))
+    hw   = max(0.001, min(1.0, body.box / (2 * W)))
+    hh   = max(0.001, min(1.0, body.box / (2 * H)))
+    w_n  = min(1.0, hw * 2)
+    h_n  = min(1.0, hh * 2)
+
+    lbl_dir.mkdir(parents=True, exist_ok=True)
+    lbl_path = lbl_dir / (Path(safe).stem + ".txt")
+    lbl_path.write_text(f"0 {cx_n:.6f} {cy_n:.6f} {w_n:.6f} {h_n:.6f}\n")
+    return {"ok": True, "cx": cx_n, "cy": cy_n, "w": w_n, "h": h_n}
+
+
+@core.delete("/api/import-yolo/label")
+def api_import_yolo_label_delete(split: str, filename: str):
+    """Setzt ein Label zurück auf 'leer' (leere .txt)."""
+    root = IMPORT_YOLO_BALL_DIR
+    if not root or not root.is_dir():
+        raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")
+    if split not in ("train", "val"):
+        raise HTTPException(400, "Ungültiger split.")
+    safe = Path(filename).name
+    lbl = root / "labels" / split / (Path(safe).stem + ".txt")
+    if lbl.exists():
+        lbl.write_text("")
+    return {"ok": True}
+
+
 @core.get("/api/export/import-yolo-zip")
 def api_export_import_yolo_zip():
     """ZIP-Download: YOLO-Struktur aus IMPORT_YOLO_BALL_DIR (für lokales YOLOv8-Training)."""

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Import-Datensatz Review</title>
-  <script defer src="static/import_review.js?v=1"></script>
+  <script defer src="static/import_review.js?v=2"></script>
   <style>
     :root {
       --bg: #0f172a; --card: #111827; --border: #1f2937; --muted: #94a3b8;
@@ -19,7 +19,6 @@
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
     .muted { color: var(--muted); font-size: 13px; }
 
-    /* Stats */
     .stats { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
     .stat { display: flex; align-items: center; gap: 8px; }
     .stat-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
@@ -30,34 +29,40 @@
     .stat-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
     .stat-total { font-size: 13px; color: var(--muted); }
 
-    /* Tabs */
     .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .tab { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: #e5e7eb; cursor: pointer; font-size: 13px; }
     .tab:hover { background: #1f2937; }
     .tab.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
 
-    /* Split toggle */
     .split-btn { padding: 6px 18px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: #e5e7eb; cursor: pointer; font-size: 13px; font-weight: 500; }
     .split-btn.active { background: #1e3a5f; border-color: #2563eb; color: #bfdbfe; }
 
-    /* Nav */
     .nav-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .nav-info { font-size: 13px; color: var(--muted); min-width: 80px; }
     .btn { background: #1f2937; border: 1px solid #374151; padding: 7px 14px; border-radius: 9px; color: #e5e7eb; cursor: pointer; font-size: 13px; white-space: nowrap; }
     .btn:hover:not(:disabled) { background: #374151; }
     .btn:disabled { opacity: 0.35; cursor: default; }
+    .btn-ok     { background: #14532d; border-color: #166534; color: #dcfce7; }
+    .btn-ok:hover:not(:disabled)     { background: #166534; }
+    .btn-noball { background: #451a03; border-color: #78350f; color: #fef3c7; }
+    .btn-noball:hover:not(:disabled) { background: #78350f; }
     .jump-input { width: 64px; height: 34px; background: #1f2937; border: 1px solid #374151; border-radius: 7px; color: #e5e7eb; padding: 0 8px; font-size: 13px; }
 
-    /* Image */
     #imgBox { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
-    #frameImg { max-width: 100%; border-radius: 10px; display: block; }
+    #frameImg { max-width: 100%; border-radius: 10px; display: block; cursor: crosshair; }
     #labelCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 10px; pointer-events: none; }
+    #crosshair {
+      position: absolute; border-radius: 50%; pointer-events: none;
+      transform: translate(-50%, -50%); display: none;
+      border: 2px solid #fbbf24;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.4), 0 0 14px rgba(251,191,36,0.5);
+    }
 
-    /* Badge */
     .badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; }
     .badge-ball  { background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
     .badge-empty { background: rgba(245,158,11,.12); color: var(--yellow); border: 1px solid rgba(245,158,11,.3); }
     .badge-none  { background: rgba(148,163,184,.1); color: var(--muted); border: 1px solid rgba(148,163,184,.2); }
+    .kbd { display:inline-block; background:#0f172a; border:1px solid #374151; border-radius:4px; padding:0 5px; font-size:11px; font-family:monospace; color:var(--muted); }
 
     #statusMsg { min-height: 18px; font-size: 13px; color: var(--muted); margin-top: 8px; }
     #loadingMsg { font-size: 13px; color: var(--muted); }
@@ -74,7 +79,7 @@
   </div>
 
   <!-- Stats -->
-  <div class="card" id="statsCard">
+  <div class="card">
     <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
       <div style="display:flex; gap:8px;">
         <button class="split-btn active" data-split="train">Train</button>
@@ -101,7 +106,6 @@
 
   <!-- Review -->
   <div class="card" id="reviewCard" style="display:none;">
-    <!-- Filter + Nav -->
     <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
       <div class="tabs">
         <button class="tab active" data-filter="all">Alle</button>
@@ -124,23 +128,35 @@
       <div id="imgBox">
         <img id="frameImg" src="" alt="frame" />
         <canvas id="labelCanvas"></canvas>
+        <div id="crosshair"></div>
       </div>
     </div>
 
-    <!-- Label-Info -->
-    <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <span id="labelBadge" class="badge badge-none">–</span>
-      <span id="filenameInfo" class="muted" style="font-size:12px; font-family:monospace;"></span>
+    <!-- Aktionen -->
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:space-between;">
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <span id="labelBadge" class="badge badge-none">–</span>
+        <label class="muted" style="display:flex; align-items:center; gap:5px;">
+          Box:
+          <input type="number" id="boxSize" value="24" min="6" max="64" step="2"
+            style="width:56px; height:30px; background:#1f2937; border:1px solid #374151; border-radius:6px; color:#e5e7eb; padding:0 6px; font-size:13px;" />
+          px
+        </label>
+        <span id="filenameInfo" class="muted" style="font-size:12px; font-family:monospace;"></span>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-ok"     id="btnOk"     >✓ OK &amp; weiter <span class="kbd">↵</span></button>
+        <button class="btn btn-noball" id="btnNoball"  >○ Kein Ball &amp; weiter <span class="kbd">N</span></button>
+      </div>
     </div>
 
     <div id="statusMsg"></div>
 
-    <div class="muted" style="margin-top:10px; font-size:12px; line-height:1.6;">
-      Dieser Datensatz ist <strong>read-only</strong> — nur zur Kontrolle. ·
-      <span style="color:var(--green);">Grünes Rechteck</span> = YOLO-Ball-Label ·
-      <span style="color:var(--yellow);">Gelb</span> = leere Label-Datei (kein Ball markiert) ·
-      <span class="kbd" style="background:#0f172a; border:1px solid #374151; border-radius:4px; padding:0 5px; font-size:11px; font-family:monospace; color:var(--muted);">←</span>
-      <span class="kbd" style="background:#0f172a; border:1px solid #374151; border-radius:4px; padding:0 5px; font-size:11px; font-family:monospace; color:var(--muted);">→</span> navigieren
+    <div class="muted" style="margin-top:10px; font-size:12px; line-height:1.7;">
+      <strong>Klick auf Bild</strong> = Ball markieren (gelber Kreis → sofort speichern mit <span class="kbd">↵</span>) ·
+      <span class="kbd">N</span> = Kein Ball bestätigen &amp; weiter ·
+      <span class="kbd">↵</span> = OK &amp; weiter (wenn bereits gelabelt) ·
+      <span class="kbd">←</span><span class="kbd">→</span> navigieren
     </div>
   </div>
 </div>

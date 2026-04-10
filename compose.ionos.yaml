@@ -14,7 +14,7 @@ services:
       - IMPORT_YOLO_BALL_DIR=/data/yolo-import
     volumes:
       - ./ball-web-labeler-subpath/data:/data/labels
-      - ./ball-yolo-import/ball_det:/data/yolo-import:ro
+      - ./ball-yolo-import/ball_det:/data/yolo-import
     restart: unless-stopped
 
   # Ball Analyzer (neue App)
