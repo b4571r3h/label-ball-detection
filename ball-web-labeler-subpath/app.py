@@ -1849,27 +1849,31 @@ def _collect_labeled_frames_for_eval(include_labeler: bool, include_import: bool
     frames: list[dict] = []
 
     if include_labeler:
-        for task_dir in sorted(DATA_DIR.iterdir()):
-            if not task_dir.is_dir():
+        for day_dir in sorted(DATA_DIR.iterdir()):
+            if not day_dir.is_dir():
                 continue
-            frames_dir = task_dir / "frames"
-            labels_dir = task_dir / "labels"
-            if not frames_dir.is_dir() or not labels_dir.is_dir():
-                continue
-            for img in sorted(frames_dir.glob("*.jpg")):
-                lbl = labels_dir / (img.stem + ".txt")
-                if not lbl.exists():
-                    continue  # none → überspringen
-                gt = "ball" if lbl.stat().st_size > 0 else "empty"
-                frames.append({
-                    "source": "labeler",
-                    "task": task_dir.name,
-                    "split": None,
-                    "filename": img.name,
-                    "img_path": str(img),
-                    "gt": gt,
-                    "gt_boxes": _parse_yolo_label_boxes(lbl) if gt == "ball" else [],
-                })
+            for task_dir in sorted(day_dir.iterdir()):
+                if not task_dir.is_dir():
+                    continue
+                frames_dir = task_dir / "frames"
+                labels_dir = task_dir / "labels"
+                if not frames_dir.is_dir() or not labels_dir.is_dir():
+                    continue
+                task_id = str(task_dir.relative_to(DATA_DIR))
+                for img in sorted(frames_dir.glob("*.jpg")):
+                    lbl = labels_dir / (img.stem + ".txt")
+                    if not lbl.exists():
+                        continue  # none → überspringen
+                    gt = "ball" if lbl.stat().st_size > 0 else "empty"
+                    frames.append({
+                        "source": "labeler",
+                        "task": task_id,
+                        "split": None,
+                        "filename": img.name,
+                        "img_path": str(img),
+                        "gt": gt,
+                        "gt_boxes": _parse_yolo_label_boxes(lbl) if gt == "ball" else [],
+                    })
 
     if include_import and IMPORT_YOLO_BALL_DIR and IMPORT_YOLO_BALL_DIR.is_dir():
         root = IMPORT_YOLO_BALL_DIR
@@ -2135,12 +2139,16 @@ def api_eval_results(job_id: str):
     return {"models": job["models"], "conf": job["conf"], "results": job["results"]}
 
 
-@core.get("/api/eval/frame/{source}/{task}/{filename}")
-def api_eval_frame(source: str, task: str, filename: str):
-    """Liefert ein Frame-Bild für die Eval-Ansicht."""
+@core.get("/api/eval/frame")
+def api_eval_frame(source: str = Query(...), task: str = Query(...), filename: str = Query(...)):
+    """Liefert ein Frame-Bild für die Eval-Ansicht (Query-Parameter, da task Schrägstriche enthält)."""
     safe = Path(filename).name
     if source == "labeler":
-        img_path = DATA_DIR / task / "frames" / safe
+        # task ist relativer Pfad z. B. "2025-01-15/my-task-123"
+        candidate = (DATA_DIR / task / "frames" / safe).resolve()
+        if not str(candidate).startswith(str(DATA_DIR.resolve())):
+            raise HTTPException(400, "Ungültiger Pfad.")
+        img_path = candidate
     elif source == "import":
         if not IMPORT_YOLO_BALL_DIR:
             raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")

@@ -333,9 +333,7 @@
         verdictHtml += `<span class="vbadge vbadge-${m.verdict}">${m.verdict}</span>`;
       });
 
-      const src = (res.source === "labeler")
-        ? API(`/api/eval/frame/labeler/${encodeURIComponent(res.task)}/${encodeURIComponent(res.filename)}`)
-        : API(`/api/eval/frame/import/${encodeURIComponent(res.task)}/${encodeURIComponent(res.filename)}`);
+      const src = API(`/api/eval/frame?source=${encodeURIComponent(res.source)}&task=${encodeURIComponent(res.task)}&filename=${encodeURIComponent(res.filename)}`);
 
       row.innerHTML = `
         <img class="thumb" src="${src}" alt="" loading="lazy" />
@@ -362,9 +360,7 @@
     });
 
     const res = filteredResults[idx];
-    const src = (res.source === "labeler")
-      ? API(`/api/eval/frame/labeler/${encodeURIComponent(res.task)}/${encodeURIComponent(res.filename)}`)
-      : API(`/api/eval/frame/import/${encodeURIComponent(res.task)}/${encodeURIComponent(res.filename)}`);
+    const src = API(`/api/eval/frame?source=${encodeURIComponent(res.source)}&task=${encodeURIComponent(res.task)}&filename=${encodeURIComponent(res.filename)}`);
 
     viewerImg.src = src;
     viewerFilename.textContent = `${res.source}/${res.task}/${res.filename}`;
