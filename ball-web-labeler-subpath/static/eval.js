@@ -41,8 +41,10 @@
   const viewerFilename = document.getElementById("viewerFilename");
   const viewerVerdicts = document.getElementById("viewerVerdicts");
   const viewerLegend  = document.getElementById("viewerLegend");
-  const btnViewerPrev = document.getElementById("btnViewerPrev");
-  const btnViewerNext = document.getElementById("btnViewerNext");
+  const btnViewerPrev  = document.getElementById("btnViewerPrev");
+  const btnViewerNext  = document.getElementById("btnViewerNext");
+  const jobList        = document.getElementById("jobList");
+  const btnRefreshJobs = document.getElementById("btnRefreshJobs");
 
   // ---- State ----
   let availableModels  = [];    // alle .pt Namen auf dem Server
@@ -460,6 +462,63 @@
     }
   });
 
+  // ---- Job-Historie ----
+  async function loadJobHistory() {
+    jobList.innerHTML = '<span class="muted">Lade…</span>';
+    const r = await fetch(API("/api/eval/jobs"));
+    if (!r.ok) { jobList.innerHTML = '<span class="muted">Fehler beim Laden.</span>'; return; }
+    const d = await r.json();
+    const jobs = d.jobs || [];
+    if (jobs.length === 0) {
+      jobList.innerHTML = '<span class="muted">Noch keine Evaluationen gespeichert.</span>';
+      return;
+    }
+    jobList.innerHTML = "";
+    jobs.forEach(job => {
+      const row = document.createElement("div");
+      row.className = "job-row";
+      const statusCls = `job-status-${job.status}`;
+      const statusLabel = job.status === "done" ? "✓ Fertig" : job.status === "error" ? "✗ Fehler" : "⏳ Läuft";
+      const modelStr = (job.models || []).join(", ") || "–";
+      const ts = job.finished_at ? new Date(job.finished_at).toLocaleString("de-DE") : (job.started_at ? new Date(job.started_at).toLocaleString("de-DE") : "–");
+      const frames = job.total ? `${job.total.toLocaleString("de-DE")} Frames` : "";
+      const conf = job.conf != null ? `conf=${job.conf}` : "";
+
+      row.innerHTML = `
+        <span class="${statusCls}" style="min-width:80px;">${statusLabel}</span>
+        <span style="font-family:monospace; color:#94a3b8; font-size:12px; min-width:70px;">${job.job_id}</span>
+        <span style="flex:1; min-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${modelStr}">${modelStr}</span>
+        <span class="muted">${frames}</span>
+        <span class="muted">${conf}</span>
+        <span class="muted" style="font-size:12px;">${ts}</span>
+        ${job.status === "done" ? `<button class="btn btn-sm btn-primary" data-load="${job.job_id}">Laden</button>` : ""}
+        <button class="btn btn-sm btn-danger" data-del="${job.job_id}">✕</button>
+      `;
+
+      const loadBtn = row.querySelector("[data-load]");
+      if (loadBtn) {
+        loadBtn.addEventListener("click", async () => {
+          loadBtn.disabled = true;
+          loadBtn.textContent = "Lade…";
+          statusMsg.textContent = `Lade Job ${job.job_id}…`;
+          await loadResults(job.job_id);
+          statusMsg.textContent = `✓ Job ${job.job_id} geladen.`;
+        });
+      }
+
+      row.querySelector("[data-del]").addEventListener("click", async (e) => {
+        const id = e.currentTarget.dataset.del;
+        await fetch(API(`/api/eval/jobs/${id}`), { method: "DELETE" });
+        await loadJobHistory();
+      });
+
+      jobList.appendChild(row);
+    });
+  }
+
+  btnRefreshJobs.addEventListener("click", loadJobHistory);
+
   // ---- Start ----
   loadModels();
+  loadJobHistory();
 })();

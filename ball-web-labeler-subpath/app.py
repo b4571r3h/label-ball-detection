@@ -91,7 +91,10 @@ EVAL_MODELS_DIR: Path = (
 )
 EVAL_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-# In-memory Job-Store für Eval-Runs
+EVAL_JOBS_DIR = EVAL_MODELS_DIR / "jobs"
+EVAL_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+# In-memory Job-Store für Eval-Runs (laufende + gecachte Jobs)
 _eval_jobs: dict[str, dict] = {}
 
 # YOLO-Split-Import (images/train|val + passende labels/train|val)
@@ -1962,10 +1965,47 @@ def _run_eval_job(job_id: str, model_names: list[str], conf: float,
 
         job["results"] = results
         job["status"]  = "done"
+        job["finished_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+        _save_job_to_disk(job_id)
 
     except Exception as exc:
         job["status"] = "error"
         job["error"]  = str(exc)
+        job["finished_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+        _save_job_to_disk(job_id)
+
+
+def _save_job_to_disk(job_id: str) -> None:
+    job = _eval_jobs.get(job_id)
+    if not job:
+        return
+    try:
+        path = EVAL_JOBS_DIR / f"{job_id}.json"
+        path.write_text(json.dumps({
+            "job_id":      job_id,
+            "status":      job["status"],
+            "models":      job.get("models", []),
+            "conf":        job.get("conf", 0.25),
+            "total":       job.get("total", 0),
+            "error":       job.get("error"),
+            "started_at":  job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "results":     job.get("results"),
+        }, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        print(f"[eval] Fehler beim Speichern von Job {job_id}: {e}")
+
+
+def _load_job_from_disk(job_id: str) -> Optional[dict]:
+    path = EVAL_JOBS_DIR / f"{job_id}.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        _eval_jobs[job_id] = data  # in Memory-Cache legen
+        return data
+    except Exception:
+        return None
 
 
 @core.get("/eval", include_in_schema=False)
@@ -2020,13 +2060,15 @@ def api_eval_run(body: EvalRunIn):
 
     job_id = uuid.uuid4().hex[:8]
     _eval_jobs[job_id] = {
-        "status":   "running",
-        "progress": 0,
-        "total":    0,
-        "models":   body.models,
-        "conf":     body.conf,
-        "results":  None,
-        "error":    None,
+        "status":     "running",
+        "progress":   0,
+        "total":      0,
+        "models":     body.models,
+        "conf":       body.conf,
+        "results":    None,
+        "error":      None,
+        "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "finished_at": None,
     }
     threading.Thread(
         target=_run_eval_job,
@@ -2038,20 +2080,54 @@ def api_eval_run(body: EvalRunIn):
 
 @core.get("/api/eval/status/{job_id}")
 def api_eval_status(job_id: str):
-    job = _eval_jobs.get(job_id)
+    job = _eval_jobs.get(job_id) or _load_job_from_disk(job_id)
     if not job:
         raise HTTPException(404, "Job nicht gefunden.")
     return {
-        "status":   job["status"],
-        "progress": job["progress"],
-        "total":    job["total"],
-        "error":    job.get("error"),
+        "status":      job["status"],
+        "progress":    job.get("progress", job.get("total", 0)),
+        "total":       job.get("total", 0),
+        "error":       job.get("error"),
+        "finished_at": job.get("finished_at"),
     }
+
+
+@core.get("/api/eval/jobs")
+def api_eval_list_jobs():
+    """Listet alle gespeicherten Eval-Jobs (aus Disk) auf."""
+    jobs = []
+    for f in sorted(EVAL_JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            jobs.append({
+                "job_id":      data.get("job_id", f.stem),
+                "status":      data.get("status"),
+                "models":      data.get("models", []),
+                "conf":        data.get("conf"),
+                "total":       data.get("total", 0),
+                "error":       data.get("error"),
+                "started_at":  data.get("started_at"),
+                "finished_at": data.get("finished_at"),
+            })
+        except Exception:
+            continue
+    return {"jobs": jobs}
+
+
+@core.delete("/api/eval/jobs/{job_id}")
+def api_eval_delete_job(job_id: str):
+    """Löscht einen gespeicherten Eval-Job."""
+    safe = Path(job_id).name
+    path = EVAL_JOBS_DIR / f"{safe}.json"
+    if path.exists():
+        path.unlink()
+    _eval_jobs.pop(safe, None)
+    return {"ok": True}
 
 
 @core.get("/api/eval/results/{job_id}")
 def api_eval_results(job_id: str):
-    job = _eval_jobs.get(job_id)
+    job = _eval_jobs.get(job_id) or _load_job_from_disk(job_id)
     if not job:
         raise HTTPException(404, "Job nicht gefunden.")
     if job["status"] != "done":

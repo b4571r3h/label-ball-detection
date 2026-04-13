@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Modell-Evaluation</title>
-  <script defer src="static/eval.js?v=1"></script>
+  <script defer src="static/eval.js?v=2"></script>
   <style>
     :root {
       --bg: #0f172a; --card: #111827; --border: #1f2937; --muted: #94a3b8;
@@ -90,6 +90,10 @@
     .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
 
     #statusMsg { font-size: 13px; color: var(--muted); min-height: 18px; margin-top: 6px; }
+    .job-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; background:#1f2937; border:1px solid #374151; font-size:13px; flex-wrap:wrap; }
+    .job-status-done    { color: var(--green);  font-weight:600; }
+    .job-status-error   { color: var(--red);    font-weight:600; }
+    .job-status-running { color: var(--yellow); font-weight:600; }
     .upload-zone { border: 2px dashed #374151; border-radius: 10px; padding: 18px; text-align: center; cursor: pointer; }
     .upload-zone:hover { border-color: var(--accent); }
     .kbd { display:inline-block; background:#0f172a; border:1px solid #374151; border-radius:4px; padding:0 5px; font-size:11px; font-family:monospace; color:var(--muted); }
@@ -104,6 +108,15 @@
       <a href="./">← Ball-Labeler</a> ·
       <a href="import-review">Import-Review</a>
     </div>
+  </div>
+
+  <!-- Frühere Jobs -->
+  <div class="card" id="jobHistoryCard">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0;">Frühere Evaluationen</h2>
+      <button class="btn btn-sm" id="btnRefreshJobs">↺ Aktualisieren</button>
+    </div>
+    <div id="jobList"><span class="muted">Lade…</span></div>
   </div>
 
   <!-- Modelle -->
