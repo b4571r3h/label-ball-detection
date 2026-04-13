@@ -51,6 +51,8 @@ import random
 import asyncio
 import hashlib
 import subprocess
+import threading
+import uuid
 import datetime as dt
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -82,6 +84,15 @@ IMPORT_YOLO_BALL_DIR: Optional[Path] = (
 APP_ROOT_PATH = os.getenv("APP_ROOT_PATH", "").rstrip("/")  # z. B. "/ball-detection"
 
 BALL_DETECTION_EXPORT_API_KEY = os.getenv("BALL_DETECTION_EXPORT_API_KEY", "").strip()
+
+_raw_eval_models = os.getenv("EVAL_MODELS_DIR", "").strip()
+EVAL_MODELS_DIR: Path = (
+    Path(_raw_eval_models).resolve() if _raw_eval_models else BASE_DIR / "eval-models"
+)
+EVAL_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+# In-memory Job-Store für Eval-Runs
+_eval_jobs: dict[str, dict] = {}
 
 # YOLO-Split-Import (images/train|val + passende labels/train|val)
 IMPORT_YOLO_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -1812,6 +1823,257 @@ def api_task_export_yolo_split(
         filename=zip_path.name,
         media_type="application/zip",
     )
+
+
+# ---------------------------------------------------------------------
+# Modell-Evaluation (YOLO vs. Ground Truth)
+# ---------------------------------------------------------------------
+
+def _parse_yolo_label_boxes(lbl_path: Path) -> list[dict]:
+    boxes = []
+    for line in lbl_path.read_text(encoding="utf-8").strip().splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 5:
+            boxes.append({
+                "cx": float(parts[1]), "cy": float(parts[2]),
+                "w":  float(parts[3]), "h":  float(parts[4]),
+            })
+    return boxes
+
+
+def _collect_labeled_frames_for_eval(include_labeler: bool, include_import: bool) -> list[dict]:
+    """Sammelt alle vollständig gelabelten Frames (ball oder explizit empty)."""
+    frames: list[dict] = []
+
+    if include_labeler:
+        for task_dir in sorted(DATA_DIR.iterdir()):
+            if not task_dir.is_dir():
+                continue
+            frames_dir = task_dir / "frames"
+            labels_dir = task_dir / "labels"
+            if not frames_dir.is_dir() or not labels_dir.is_dir():
+                continue
+            for img in sorted(frames_dir.glob("*.jpg")):
+                lbl = labels_dir / (img.stem + ".txt")
+                if not lbl.exists():
+                    continue  # none → überspringen
+                gt = "ball" if lbl.stat().st_size > 0 else "empty"
+                frames.append({
+                    "source": "labeler",
+                    "task": task_dir.name,
+                    "split": None,
+                    "filename": img.name,
+                    "img_path": str(img),
+                    "gt": gt,
+                    "gt_boxes": _parse_yolo_label_boxes(lbl) if gt == "ball" else [],
+                })
+
+    if include_import and IMPORT_YOLO_BALL_DIR and IMPORT_YOLO_BALL_DIR.is_dir():
+        root = IMPORT_YOLO_BALL_DIR
+        for split in ("train", "val"):
+            img_dir = root / "images" / split
+            lbl_dir = root / "labels" / split
+            if not img_dir.is_dir():
+                continue
+            for img in sorted(img_dir.iterdir()):
+                if img.suffix.lower() not in IMPORT_YOLO_IMG_EXT:
+                    continue
+                lbl = lbl_dir / (img.stem + ".txt")
+                if not lbl.exists():
+                    continue  # none → überspringen
+                gt = "ball" if lbl.stat().st_size > 0 else "empty"
+                frames.append({
+                    "source": "import",
+                    "task": split,
+                    "split": split,
+                    "filename": img.name,
+                    "img_path": str(img),
+                    "gt": gt,
+                    "gt_boxes": _parse_yolo_label_boxes(lbl) if gt == "ball" else [],
+                })
+
+    return frames
+
+
+def _run_eval_job(job_id: str, model_names: list[str], conf: float,
+                  include_labeler: bool, include_import: bool) -> None:
+    job = _eval_jobs[job_id]
+    try:
+        from ultralytics import YOLO  # lazy import – nur wenn gebraucht
+
+        models: dict[str, object] = {}
+        for name in model_names:
+            mp = EVAL_MODELS_DIR / Path(name).name
+            if not mp.exists():
+                raise FileNotFoundError(f"Modell nicht gefunden: {name}")
+            models[name] = YOLO(str(mp))
+
+        frames = _collect_labeled_frames_for_eval(include_labeler, include_import)
+        job["total"] = len(frames)
+        job["progress"] = 0
+
+        results: list[dict] = []
+        for i, frame in enumerate(frames):
+            if job.get("cancelled"):
+                break
+
+            frame_result: dict = {
+                "source": frame["source"],
+                "task":   frame["task"],
+                "split":  frame["split"],
+                "filename": frame["filename"],
+                "gt":     frame["gt"],
+                "gt_boxes": frame["gt_boxes"],
+                "models": {},
+            }
+
+            for model_name, model in models.items():
+                preds = model(frame["img_path"], conf=conf, verbose=False)[0]
+                pred_boxes = []
+                for box in preds.boxes:
+                    xyxyn = box.xyxyn[0].tolist()
+                    cx = (xyxyn[0] + xyxyn[2]) / 2
+                    cy = (xyxyn[1] + xyxyn[3]) / 2
+                    w  = xyxyn[2] - xyxyn[0]
+                    h  = xyxyn[3] - xyxyn[1]
+                    pred_boxes.append({
+                        "cx": cx, "cy": cy, "w": w, "h": h,
+                        "conf": round(float(box.conf[0]), 4),
+                    })
+
+                has_gt   = frame["gt"] == "ball"
+                has_pred = len(pred_boxes) > 0
+                if has_gt and has_pred:
+                    verdict = "TP"
+                elif has_gt and not has_pred:
+                    verdict = "FN"
+                elif not has_gt and has_pred:
+                    verdict = "FP"
+                else:
+                    verdict = "TN"
+
+                frame_result["models"][model_name] = {
+                    "verdict": verdict,
+                    "boxes":   pred_boxes,
+                }
+
+            results.append(frame_result)
+            job["progress"] = i + 1
+
+        job["results"] = results
+        job["status"]  = "done"
+
+    except Exception as exc:
+        job["status"] = "error"
+        job["error"]  = str(exc)
+
+
+@core.get("/eval", include_in_schema=False)
+def eval_html():
+    return FileResponse(str(STATIC_DIR / "eval.html"))
+
+
+@core.get("/api/eval/models")
+def api_eval_list_models():
+    """Listet verfügbare .pt-Modelle aus EVAL_MODELS_DIR."""
+    models = [f.name for f in sorted(EVAL_MODELS_DIR.glob("*.pt"))]
+    return {"models": models, "dir": str(EVAL_MODELS_DIR)}
+
+
+@core.post("/api/eval/models")
+async def api_eval_upload_model(file: UploadFile = File(...)):
+    """Lädt ein .pt-Modell in EVAL_MODELS_DIR hoch."""
+    if not (file.filename or "").endswith(".pt"):
+        raise HTTPException(400, "Nur .pt-Dateien erlaubt.")
+    safe = Path(file.filename).name
+    content = await file.read()
+    if len(content) > 600 * 1024 * 1024:
+        raise HTTPException(413, "Datei zu groß (max 600 MB).")
+    (EVAL_MODELS_DIR / safe).write_bytes(content)
+    return {"ok": True, "name": safe}
+
+
+@core.delete("/api/eval/models/{name}")
+def api_eval_delete_model(name: str):
+    """Löscht ein Modell aus EVAL_MODELS_DIR."""
+    p = EVAL_MODELS_DIR / Path(name).name
+    if p.exists():
+        p.unlink()
+    return {"ok": True}
+
+
+class EvalRunIn(BaseModel):
+    models: list[str]
+    conf: float = 0.25
+    include_labeler: bool = True
+    include_import: bool = True
+
+
+@core.post("/api/eval/run")
+def api_eval_run(body: EvalRunIn):
+    """Startet einen Eval-Job im Hintergrund."""
+    for name in body.models:
+        if not (EVAL_MODELS_DIR / Path(name).name).exists():
+            raise HTTPException(404, f"Modell nicht gefunden: {name}")
+    if not body.models:
+        raise HTTPException(400, "Mindestens ein Modell angeben.")
+
+    job_id = uuid.uuid4().hex[:8]
+    _eval_jobs[job_id] = {
+        "status":   "running",
+        "progress": 0,
+        "total":    0,
+        "models":   body.models,
+        "conf":     body.conf,
+        "results":  None,
+        "error":    None,
+    }
+    threading.Thread(
+        target=_run_eval_job,
+        args=(job_id, body.models, body.conf, body.include_labeler, body.include_import),
+        daemon=True,
+    ).start()
+    return {"job_id": job_id}
+
+
+@core.get("/api/eval/status/{job_id}")
+def api_eval_status(job_id: str):
+    job = _eval_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job nicht gefunden.")
+    return {
+        "status":   job["status"],
+        "progress": job["progress"],
+        "total":    job["total"],
+        "error":    job.get("error"),
+    }
+
+
+@core.get("/api/eval/results/{job_id}")
+def api_eval_results(job_id: str):
+    job = _eval_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job nicht gefunden.")
+    if job["status"] != "done":
+        raise HTTPException(400, f"Job nicht fertig (status={job['status']}).")
+    return {"models": job["models"], "conf": job["conf"], "results": job["results"]}
+
+
+@core.get("/api/eval/frame/{source}/{task}/{filename}")
+def api_eval_frame(source: str, task: str, filename: str):
+    """Liefert ein Frame-Bild für die Eval-Ansicht."""
+    safe = Path(filename).name
+    if source == "labeler":
+        img_path = DATA_DIR / task / "frames" / safe
+    elif source == "import":
+        if not IMPORT_YOLO_BALL_DIR:
+            raise HTTPException(503, "IMPORT_YOLO_BALL_DIR nicht gesetzt.")
+        img_path = IMPORT_YOLO_BALL_DIR / "images" / task / safe
+    else:
+        raise HTTPException(400, "Ungültige Quelle.")
+    if not img_path.is_file():
+        raise HTTPException(404, "Frame nicht gefunden.")
+    return FileResponse(str(img_path))
 
 
 # ---------------------------------------------------------------------

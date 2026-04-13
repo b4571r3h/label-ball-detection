@@ -6,3 +6,4 @@ pillow>=10.3
 opencv-python>=4.8
 yt-dlp  # kein Pin: YouTube-Compat-Updates erfordern immer neueste Version
 aiofiles>=23.2
+ultralytics>=8.2
