@@ -51,7 +51,15 @@ jobs:
         file: ./ball-admin/Dockerfile
         push: true
         tags: ghcr.io/${{ github.repository_owner }}/ball-admin:latest
-    
+
+    - name: Build and push Ball Auto-Label
+      uses: docker/build-push-action@v5
+      with:
+        context: ./ball-auto-label
+        file: ./ball-auto-label/Dockerfile
+        push: true
+        tags: ghcr.io/${{ github.repository_owner }}/ball-auto-label:latest
+
     - name: Deploy to IONOS Server
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -61,8 +69,9 @@ jobs:
         script: |
           cd /root/tt-apps
           git pull origin main
+          mkdir -p ball-auto-label/data
           # Nur bekannte Images ziehen (ball-analyzer:fixed und dev-spinevo bleiben außen vor)
-          docker compose -f compose.ionos.yaml pull ball-labeler ball-admin caddy
+          docker compose -f compose.ionos.yaml pull ball-labeler ball-admin ball-auto-label caddy
           # Nur diese Services neu starten (dev-spinevo hat eigenen Deploy-Workflow)
-          docker compose -f compose.ionos.yaml up -d --force-recreate ball-labeler ball-admin ball-analyzer caddy
+          docker compose -f compose.ionos.yaml up -d --force-recreate ball-labeler ball-admin ball-analyzer ball-auto-label caddy
           docker system prune -f

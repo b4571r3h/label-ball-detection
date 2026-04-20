@@ -54,6 +54,19 @@ services:
       - MODAL_TOKEN=${SPINEVO_MODAL_TOKEN}
     restart: unless-stopped
 
+  # Auto-Label + Review Tool
+  ball-auto-label:
+    image: ghcr.io/b4571r3h/ball-auto-label:latest
+    container_name: tt-ball-auto-label
+    environment:
+      - MODEL_PATH=/runs/detect/v2/weights/best.pt
+      - DATA_DIR=/data
+      - REVIEW_PASSWORT=${REVIEW_PASSWORT:-spinevo123}
+    volumes:
+      - ./ball-web-analyzer/runs:/runs:ro          # Modell (read-only)
+      - ./ball-auto-label/data:/data               # Labels + Queue
+    restart: unless-stopped
+
   # Reverse Proxy (kombiniert beide Apps)
   caddy:
     image: caddy:2-alpine
@@ -70,6 +83,7 @@ services:
       - ball-labeler
       - ball-analyzer
       - ball-admin
+      - ball-auto-label
 
 volumes:
   caddy_data:

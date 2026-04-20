@@ -38,8 +38,17 @@ app.basti-reh.de {
 # DNS: Subdomain balls.spinevo.app → A/AAAA auf dieselbe Server-IP wie der Reverse-Proxy.
 # Pfade werden auf /ball-detection/* gemappt (gleicher Container, APP_ROOT_PATH bleibt /ball-detection).
 balls.spinevo.app {
-    rewrite * /ball-detection{http.request.uri}
-    reverse_proxy tt-ball-labeler:8000
+    # Auto-Label + Review Tool
+    handle /auto-label* {
+        uri strip_prefix /auto-label
+        reverse_proxy tt-ball-auto-label:8003
+    }
+
+    # Ball-Labeler (alles andere)
+    handle {
+        rewrite * /ball-detection{http.request.uri}
+        reverse_proxy tt-ball-labeler:8000
+    }
 }
 
 # SpinEvo Dev (dev.spinevo.app)
