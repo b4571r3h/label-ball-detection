@@ -62,15 +62,12 @@ jobs:
 
     - name: Deploy to IONOS Server
       uses: appleboy/ssh-action@v1.0.0
-      env:
-        GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         host: ${{ secrets.IONOS_HOST }}
         username: ${{ secrets.IONOS_USER }}
         key: ${{ secrets.IONOS_SSH_KEY }}
-        envs: GHCR_TOKEN
         script: |
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           cd /root/tt-apps
           git pull origin main
           mkdir -p ball-auto-label/data
