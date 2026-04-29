@@ -160,15 +160,16 @@
     const displayH = frameImg.clientHeight;
 
     for (const b of boxes) {
-      const cx  = b.cx * displayW;
-      const cy  = b.cy * displayH;
-      const dia = Math.max(b.w, b.h) * displayW;
-      const el  = document.createElement("div");
+      const cx = b.cx * displayW;
+      const cy = b.cy * displayH;
+      const bw = b.w * displayW;
+      const bh = b.h * displayH;
+      const el = document.createElement("div");
       el.className  = "label-circle";
       el.style.left = `${cx}px`;
       el.style.top  = `${cy}px`;
-      el.style.width  = `${dia}px`;
-      el.style.height = `${dia}px`;
+      el.style.width  = `${bw}px`;
+      el.style.height = `${bh}px`;
       labelOverlay.appendChild(el);
     }
 
