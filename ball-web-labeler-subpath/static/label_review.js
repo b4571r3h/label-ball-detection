@@ -51,6 +51,7 @@
   const imgBox       = document.getElementById("imgBox");
   const labelBadge   = document.getElementById("labelBadge");
   const boxSizeInput = document.getElementById("boxSize");
+  const btnHq        = document.getElementById("btnHq");
   const btnOk        = document.getElementById("btnOk");
   const btnNoball    = document.getElementById("btnNoball");
   const btnDelete    = document.getElementById("btnDelete");
@@ -64,6 +65,7 @@
   let currentFilter   = "all";
   let currentIndex    = 0;
   let busy            = false; // verhindert parallele API-Calls
+  let currentHQ       = false;
 
   // ---- Status-Anzeige ----
   function setStatus(msg, isError = false) {
@@ -134,7 +136,7 @@
     frameImg.src = API(`/api/task/${encodeURIComponent(currentTaskId)}/frame/${encodeURIComponent(filename)}`);
     await new Promise(res => { frameImg.onload = res; frameImg.onerror = res; });
 
-    await refreshLabel(filename);
+    await Promise.all([refreshLabel(filename), loadHqStatus(filename)]);
   }
 
   async function refreshLabel(filename) {
@@ -186,7 +188,37 @@
     setStatus("");
   }
 
-  // ---- Crosshair ----
+  // ---- HQ-Tag ----
+  function renderHqBtn(isHq) {
+    currentHQ = isHq;
+    btnHq.classList.toggle("hq-active", isHq);
+    btnHq.title = isHq ? "HQ-Tag entfernen (H)" : "Als High-Quality markieren (H)";
+  }
+
+  async function loadHqStatus(filename) {
+    renderHqBtn(false);
+    if (!currentTaskId || !filename) return;
+    const r = await fetch(API(`/api/frame-tag?source=labeler&task=${encodeURIComponent(currentTaskId)}&filename=${encodeURIComponent(filename)}`));
+    if (!r.ok) return;
+    const d = await r.json();
+    renderHqBtn(d.is_hq === true);
+  }
+
+  async function toggleHq() {
+    if (!currentTaskId || filteredFrames.length === 0) return;
+    const filename = filteredFrames[currentIndex]?.filename;
+    if (!filename) return;
+    const r = await fetch(API("/api/frame-tag"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "labeler", task: currentTaskId, filename, tag: "hq", action: "toggle" }),
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    renderHqBtn(d.is_hq === true);
+    setStatus(d.is_hq ? "★ Als HQ markiert." : "HQ-Tag entfernt.");
+  }
+
   // ---- Aktionen ----
   async function actionOk() {
     if (busy || !currentTaskId || filteredFrames.length === 0) return;
@@ -380,6 +412,7 @@
   });
   jumpInput.addEventListener("keydown", e => { if (e.key === "Enter") btnJump.click(); });
 
+  btnHq.addEventListener("click",     () => void toggleHq());
   btnOk.addEventListener("click",     () => void actionOk());
   btnNoball.addEventListener("click", () => void actionNoball());
   btnDelete.addEventListener("click", () => void actionDelete());
@@ -414,6 +447,11 @@
       case "Enter":
         e.preventDefault();
         void actionOk();
+        break;
+      case "h":
+      case "H":
+        e.preventDefault();
+        void toggleHq();
         break;
       case "n":
       case "N":

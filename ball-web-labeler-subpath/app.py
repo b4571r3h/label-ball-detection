@@ -355,6 +355,36 @@ def image_size(jpg_path: Path) -> tuple[int, int]:
 # Pydantic Models
 # ---------------------------------------------------------------------
 
+class FrameTagIn(BaseModel):
+    source: str        # "labeler" oder "import"
+    task: str          # task_id (labeler) oder split z. B. "train" (import)
+    filename: str
+    tag: str = "hq"
+    action: str = "toggle"  # "add" | "remove" | "toggle"
+
+
+def _labeler_tags_path(tid: str) -> Path:
+    return task_dir(tid) / "frame_tags.json"
+
+
+def _import_tags_path() -> Path:
+    return DATA_DIR / "_import_frame_tags.json"
+
+
+def _load_tags(path: Path) -> dict:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_tags(path: Path, tags: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(tags, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 class LabelIn(BaseModel):
     filename: str  # z. B. "000123.jpg"
     cx: float      # Klick: center-x in Pixel
@@ -1210,6 +1240,109 @@ def api_export_import_yolo_zip():
         filename="spinvo-yolo-import.zip",
         media_type="application/zip",
     )
+
+
+@core.get("/api/frame-tag")
+def api_get_frame_tag(source: str, task: str, filename: str):
+    """Gibt Tags für einen Frame zurück. source: 'labeler' | 'import'"""
+    if source == "labeler":
+        path = _labeler_tags_path(task)
+        key = filename
+    elif source == "import":
+        path = _import_tags_path()
+        key = f"{task}/{filename}"
+    else:
+        raise HTTPException(400, "source muss 'labeler' oder 'import' sein")
+    tags = _load_tags(path)
+    return {"tags": tags.get(key, []), "is_hq": "hq" in tags.get(key, [])}
+
+
+@core.post("/api/frame-tag")
+def api_set_frame_tag(body: FrameTagIn):
+    """HQ-Tag setzen / entfernen / togglen."""
+    if body.source == "labeler":
+        if not task_dir(body.task).exists():
+            raise HTTPException(404, "Task nicht gefunden")
+        path = _labeler_tags_path(body.task)
+        key = body.filename
+    elif body.source == "import":
+        path = _import_tags_path()
+        key = f"{body.task}/{body.filename}"
+    else:
+        raise HTTPException(400, "source muss 'labeler' oder 'import' sein")
+
+    tags = _load_tags(path)
+    current: list = tags.get(key, [])
+
+    has = body.tag in current
+    if body.action == "add" or (body.action == "toggle" and not has):
+        if not has:
+            current = current + [body.tag]
+    elif body.action == "remove" or (body.action == "toggle" and has):
+        current = [t for t in current if t != body.tag]
+
+    if current:
+        tags[key] = current
+    else:
+        tags.pop(key, None)
+    _save_tags(path, tags)
+    return {"tags": current, "is_hq": "hq" in current}
+
+
+@core.get("/api/export/yolo-dataset-hq")
+def api_export_hq_dataset(seed: int = 42, val_fraction: float = 0.2):
+    """ZIP-Export aller als HQ getaggten Frames (YOLO-Format, Train/Val-Split)."""
+    pairs: list[tuple[Path, Path]] = []
+
+    # Labeler-Tasks
+    if DATA_DIR.is_dir():
+        for td in DATA_DIR.iterdir():
+            if not td.is_dir() or td.name.startswith("_"):
+                continue
+            tags = _load_tags(_labeler_tags_path(td.name))
+            hq = {k for k, v in tags.items() if "hq" in v}
+            frames_dir = td / "frames"
+            labels_dir = td / "labels"
+            for fname in hq:
+                img = frames_dir / fname
+                lab = labels_dir / (Path(fname).stem + ".txt")
+                if img.exists() and lab.exists():
+                    pairs.append((img, lab))
+
+    # Import-Datensatz
+    if IMPORT_YOLO_BALL_DIR and IMPORT_YOLO_BALL_DIR.is_dir():
+        tags = _load_tags(_import_tags_path())
+        for key, v in tags.items():
+            if "hq" not in v:
+                continue
+            parts = key.split("/", 1)
+            if len(parts) != 2:
+                continue
+            split, fname = parts
+            img = IMPORT_YOLO_BALL_DIR / "images" / split / fname
+            lab = IMPORT_YOLO_BALL_DIR / "labels" / split / (Path(fname).stem + ".txt")
+            if img.exists() and lab.exists():
+                pairs.append((img, lab))
+
+    if not pairs:
+        raise HTTPException(422, "Keine HQ-getaggten Frames gefunden.")
+
+    rng = random.Random(seed)
+    rng.shuffle(pairs)
+    n_val = max(1, int(len(pairs) * val_fraction))
+    val_pairs   = pairs[:n_val]
+    train_pairs = pairs[n_val:]
+
+    tmp = Path(tempfile.mkdtemp(prefix="hq_export_"))
+    zip_path = tmp / "spinevo-yolo-hq.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("dataset.yaml", "path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames: ['ball']\n")
+        for split_name, split_pairs in [("train", train_pairs), ("val", val_pairs)]:
+            for img_p, lab_p in split_pairs:
+                zf.write(img_p, arcname=f"images/{split_name}/{img_p.name}")
+                zf.write(lab_p, arcname=f"labels/{split_name}/{lab_p.stem}.txt")
+
+    return FileResponse(str(zip_path), media_type="application/zip", filename="spinevo-yolo-hq.zip")
 
 
 @core.get(

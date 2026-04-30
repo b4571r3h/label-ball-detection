@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Label Review</title>
-  <script defer src="static/label_review.js?v=7"></script>
+  <script defer src="static/label_review.js?v=8"></script>
   <style>
     :root {
       --bg: #0f172a;
@@ -61,6 +61,10 @@
     .btn-noball:hover:not(:disabled) { background: #78350f; }
     .btn-del    { background: #450a0a; border-color: #7f1d1d; color: #fee2e2; }
     .btn-del:hover:not(:disabled) { background: #7f1d1d; }
+    .btn-hq     { background: #1c1a05; border-color: #713f12; color: #fef08a; }
+    .btn-hq:hover:not(:disabled) { background: #713f12; }
+    .btn-hq.hq-active { background: #713f12; border-color: #ca8a04; color: #fef08a; font-weight: 700; }
+    .badge-hq   { background: rgba(250,204,21,0.12); color: #fde047; border: 1px solid rgba(250,204,21,0.3); }
 
     .jump-input {
       width: 70px; height: 38px; background: #1f2937; border: 1px solid #374151;
@@ -298,6 +302,7 @@
           </label>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-hq"     id="btnHq"     type="button">★ HQ <span class="kbd">H</span></button>
           <button class="btn btn-ok"     id="btnOk"     type="button">✓ OK <span class="kbd">↵</span></button>
           <button class="btn btn-noball" id="btnNoball" type="button">○ Kein Ball <span class="kbd">N</span></button>
           <button class="btn btn-del"    id="btnDelete" type="button">🗑 Löschen <span class="kbd">Del</span></button>
@@ -307,9 +312,10 @@
       <div id="statusMsg"></div>
 
       <div class="muted" style="margin-top:10px; font-size:12px; line-height:1.6;">
-        Klick auf Bild = Ball-Position sofort speichern (grüner Kreis) ·
+        Klick auf Bild = Ball-Position sofort speichern ·
         <span class="kbd">↵</span> weiter ·
         <span class="kbd">N</span> Kein Ball &amp; weiter ·
+        <span class="kbd">H</span> HQ-Tag togglen ·
         <span class="kbd">Del</span> Label löschen ·
         <span class="kbd">←</span> <span class="kbd">→</span> navigieren
       </div>

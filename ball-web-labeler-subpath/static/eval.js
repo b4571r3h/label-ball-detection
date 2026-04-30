@@ -43,6 +43,7 @@
   const viewerLegend  = document.getElementById("viewerLegend");
   const btnViewerPrev  = document.getElementById("btnViewerPrev");
   const btnViewerNext  = document.getElementById("btnViewerNext");
+  const btnHq          = document.getElementById("btnHq");
   const jobList        = document.getElementById("jobList");
   const btnRefreshJobs = document.getElementById("btnRefreshJobs");
 
@@ -57,6 +58,7 @@
   const PAGE_SIZE      = 30;
   let selectedIndex    = -1;    // Index in filteredResults
   let pollTimer        = null;
+  let currentHQ        = false;
 
   // ---- Konfidenz-Slider ----
   confSlider.addEventListener("input", () => {
@@ -376,9 +378,10 @@
     btnViewerPrev.disabled = idx <= 0;
     btnViewerNext.disabled = idx >= filteredResults.length - 1;
 
-    await new Promise(res => { viewerImg.onload = res; viewerImg.onerror = res; });
+    await new Promise(resolve => { viewerImg.onload = resolve; viewerImg.onerror = resolve; });
     drawViewerBoxes(res);
     renderLegend(res);
+    void loadHqStatus(res);
   }
 
   function drawViewerBoxes(res) {
@@ -441,6 +444,38 @@
     viewerLegend.innerHTML = html;
   }
 
+  // ---- HQ-Tag (Eval) ----
+  function renderHqBtn(isHq) {
+    currentHQ = isHq;
+    btnHq.classList.toggle("hq-active", isHq);
+    btnHq.title = isHq ? "HQ-Tag entfernen (H)" : "Als High-Quality markieren (H)";
+  }
+
+  async function loadHqStatus(res) {
+    renderHqBtn(false);
+    const source = res.source === "import" ? "import" : "labeler";
+    const r = await fetch(API(`/api/frame-tag?source=${encodeURIComponent(source)}&task=${encodeURIComponent(res.task)}&filename=${encodeURIComponent(res.filename)}`));
+    if (!r.ok) return;
+    const d = await r.json();
+    renderHqBtn(d.is_hq === true);
+  }
+
+  async function toggleHq() {
+    if (selectedIndex < 0 || selectedIndex >= filteredResults.length) return;
+    const res = filteredResults[selectedIndex];
+    const source = res.source === "import" ? "import" : "labeler";
+    const r = await fetch(API("/api/frame-tag"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, task: res.task, filename: res.filename, tag: "hq", action: "toggle" }),
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    renderHqBtn(d.is_hq === true);
+  }
+
+  btnHq.addEventListener("click", () => void toggleHq());
+
   btnViewerPrev.addEventListener("click", () => { if (selectedIndex > 0) openViewer(selectedIndex - 1); });
   btnViewerNext.addEventListener("click", () => { if (selectedIndex < filteredResults.length - 1) openViewer(selectedIndex + 1); });
 
@@ -449,6 +484,7 @@
     if (viewerWrap.style.display === "none") return;
     if (e.key === "ArrowLeft"  && selectedIndex > 0) { e.preventDefault(); openViewer(selectedIndex - 1); }
     if (e.key === "ArrowRight" && selectedIndex < filteredResults.length - 1) { e.preventDefault(); openViewer(selectedIndex + 1); }
+    if (e.key === "h" || e.key === "H") { e.preventDefault(); void toggleHq(); }
   });
 
   // Viewer-Canvas bei Größenänderung neu zeichnen

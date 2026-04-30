@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Modell-Evaluation</title>
-  <script defer src="static/eval.js?v=3"></script>
+  <script defer src="static/eval.js?v=4"></script>
   <style>
     :root {
       --bg: #0f172a; --card: #111827; --border: #1f2937; --muted: #94a3b8;
@@ -29,6 +29,11 @@
     .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
     .btn-danger  { background: #450a0a; border-color: #7f1d1d; color: #fca5a5; }
     .btn-danger:hover:not(:disabled) { background: #7f1d1d; }
+    .btn-hq      { background: #1c1a05; border-color: #713f12; color: #fef08a; }
+    .btn-hq:hover:not(:disabled)  { background: #713f12; }
+    .btn-hq.hq-active { background: #713f12; border-color: #ca8a04; color: #fef08a; font-weight: 700; }
+    .hq-dot { font-size: 13px; color: #fde047; margin-left: 4px; display: none; }
+    .hq-dot.visible { display: inline; }
     .btn-sm { padding: 4px 10px; font-size: 12px; }
 
     .model-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: #1f2937; border: 1px solid #374151; }
@@ -193,7 +198,8 @@
           <span id="viewerFilename" style="font-family:monospace; font-size:13px;"></span>
           <span id="viewerVerdicts" style="margin-left:8px;"></span>
         </div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn btn-hq btn-sm" id="btnHq">★ HQ <span class="kbd">H</span></button>
           <button class="btn btn-sm" id="btnViewerPrev" disabled>◀ vorher</button>
           <button class="btn btn-sm" id="btnViewerNext" disabled>▶ nächster</button>
         </div>
