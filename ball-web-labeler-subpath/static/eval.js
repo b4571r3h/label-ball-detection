@@ -35,6 +35,8 @@
   const btnNextPage   = document.getElementById("btnNextPage");
   const pageInfo      = document.getElementById("pageInfo");
   const totalInfo     = document.getElementById("totalInfo");
+  const errorTasksCard = document.getElementById("errorTasksCard");
+  const errorTasksList = document.getElementById("errorTasksList");
   const viewerWrap    = document.getElementById("viewerWrap");
   const viewerImg     = document.getElementById("viewerImg");
   const viewerCanvas  = document.getElementById("viewerCanvas");
@@ -229,9 +231,11 @@
       currentModelKey = modelFilter.value;
       applyFilter();
       renderStats(models);
+      renderErrorTasks();
     });
 
     renderStats(models);
+    renderErrorTasks();
     applyFilter();
     resultsSection.style.display = "block";
   }
@@ -442,6 +446,87 @@
       html += `<div class="legend-item"><div class="legend-dot" style="background:${color};"></div><span>${name}</span></div>`;
     });
     viewerLegend.innerHTML = html;
+  }
+
+  // ---- Top-10 Fehler-Tasks ----
+  function renderErrorTasks() {
+    if (!allResults.length || !currentModelKey) { errorTasksCard.style.display = "none"; return; }
+    errorTasksCard.style.display = "block";
+
+    // Gruppieren nach Task
+    const taskMap = new Map(); // key: "source::task"
+    for (const res of allResults) {
+      const key = `${res.source}::${res.task}`;
+      if (!taskMap.has(key)) taskMap.set(key, { source: res.source, task: res.task, fp: 0, fn: 0, total: 0 });
+      const t = taskMap.get(key);
+      t.total++;
+      const m = res.models[currentModelKey];
+      if (!m) continue;
+      if (m.verdict === "FP") t.fp++;
+      else if (m.verdict === "FN") t.fn++;
+    }
+
+    const rows = [...taskMap.values()]
+      .map(t => ({ ...t, errors: t.fp + t.fn, rate: (t.fp + t.fn) / t.total }))
+      .filter(t => t.errors > 0)
+      .sort((a, b) => b.errors - a.errors || b.rate - a.rate)
+      .slice(0, 10);
+
+    if (rows.length === 0) {
+      errorTasksList.innerHTML = '<div class="muted">Keine Fehler in diesem Eval. ✓</div>';
+      return;
+    }
+
+    const maxErrors = rows[0].errors;
+    let html = `<table class="err-table">
+      <thead><tr>
+        <th>#</th><th>Task</th>
+        <th style="text-align:right;">FP</th>
+        <th style="text-align:right;">FN</th>
+        <th style="text-align:right;">Fehler</th>
+        <th style="text-align:right;">Rate</th>
+        <th></th>
+        <th></th>
+      </tr></thead><tbody>`;
+
+    rows.forEach((t, i) => {
+      const barW = Math.round((t.errors / maxErrors) * 90);
+      const taskLabel = t.source === "import" ? `[Import] ${t.task}` : t.task;
+      html += `<tr>
+        <td class="err-rank">${i + 1}</td>
+        <td class="err-task" title="${taskLabel}">${taskLabel}</td>
+        <td style="text-align:right; color:var(--red);">${t.fp}</td>
+        <td style="text-align:right; color:var(--orange);">${t.fn}</td>
+        <td style="text-align:right; font-weight:600;">${t.errors}</td>
+        <td style="text-align:right; color:var(--muted);">${(t.rate * 100).toFixed(0)} %</td>
+        <td><span class="err-bar-wrap"><span class="err-bar" style="width:${barW}px;"></span></span></td>
+        <td>
+          <button class="err-filter-btn" data-task="${t.task}" data-source="${t.source}">nur FP+FN</button>
+        </td>
+      </tr>`;
+    });
+
+    html += "</tbody></table>";
+    errorTasksList.innerHTML = html;
+
+    // Filter-Buttons: zeige nur FP+FN des gewählten Tasks
+    errorTasksList.querySelectorAll(".err-filter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const task = btn.dataset.task;
+        const source = btn.dataset.source;
+        filteredResults = allResults.filter(res => {
+          if (res.task !== task || res.source !== source) return false;
+          const m = res.models[currentModelKey];
+          return m && (m.verdict === "FP" || m.verdict === "FN");
+        });
+        currentPage = 0;
+        selectedIndex = -1;
+        viewerWrap.style.display = "none";
+        // Filter-Tabs visuell zurücksetzen
+        filterTabs.forEach(t => t.classList.remove("active"));
+        renderList();
+      });
+    });
   }
 
   // ---- HQ-Tag (Eval) ----

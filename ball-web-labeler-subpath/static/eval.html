@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Modell-Evaluation</title>
-  <script defer src="static/eval.js?v=4"></script>
+  <script defer src="static/eval.js?v=5"></script>
   <style>
     :root {
       --bg: #0f172a; --card: #111827; --border: #1f2937; --muted: #94a3b8;
@@ -103,6 +103,16 @@
     .upload-zone:hover { border-color: var(--accent); }
     .kbd { display:inline-block; background:#0f172a; border:1px solid #374151; border-radius:4px; padding:0 5px; font-size:11px; font-family:monospace; color:var(--muted); }
     #paginationWrap { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); }
+    .err-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .err-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 10px 8px 0; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+    .err-table td { padding: 6px 10px 6px 0; border-top: 1px solid #1f2937; vertical-align: middle; }
+    .err-table tr:hover td { background: rgba(255,255,255,.02); }
+    .err-rank { color: var(--muted); font-size: 12px; min-width: 20px; }
+    .err-bar-wrap { width: 90px; background: #1f2937; border-radius: 3px; height: 6px; display: inline-block; vertical-align: middle; }
+    .err-bar { height: 6px; border-radius: 3px; background: var(--red); }
+    .err-task { font-family: monospace; font-size: 12px; color: #cbd5e1; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .err-filter-btn { font-size: 11px; padding: 2px 7px; border-radius: 5px; border: 1px solid #374151; background: #1f2937; color: #94a3b8; cursor: pointer; white-space: nowrap; }
+    .err-filter-btn:hover { background: #374151; }
   </style>
 </head>
 <body>
@@ -167,6 +177,12 @@
   <div id="resultsSection" style="display:none;">
     <!-- Statistiken pro Modell -->
     <div id="statsSection"></div>
+
+    <!-- Top-10 Fehler-Tasks -->
+    <div class="card" id="errorTasksCard">
+      <h2 style="margin-bottom:10px;">Top 10 — Tasks mit höchster Fehlerquote</h2>
+      <div id="errorTasksList"></div>
+    </div>
 
     <!-- Liste + Viewer -->
     <div class="card">
