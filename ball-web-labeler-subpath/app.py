@@ -1289,6 +1289,35 @@ def api_set_frame_tag(body: FrameTagIn):
     return {"tags": current, "is_hq": "hq" in current}
 
 
+@core.get("/api/frames-hq")
+def api_frames_hq():
+    """Alle HQ-getaggten Labeler-Frames über alle Tasks, mit Label-Status."""
+    result = []
+    if not DATA_DIR.is_dir():
+        return {"frames": [], "total": 0}
+    for td in sorted(DATA_DIR.iterdir()):
+        if not td.is_dir() or td.name.startswith("_"):
+            continue
+        task_id = td.name
+        tags = _load_tags(_labeler_tags_path(task_id))
+        hq_files = sorted(k for k, v in tags.items() if "hq" in v)
+        if not hq_files:
+            continue
+        frames_dir = td / "frames"
+        labels_dir = td / "labels"
+        for fname in hq_files:
+            if not (frames_dir / fname).exists():
+                continue
+            lab = labels_dir / (Path(fname).stem + ".txt")
+            if not lab.exists():
+                status = "none"
+            else:
+                content = lab.read_text(encoding="utf-8", errors="ignore").strip()
+                status = "empty" if not content else "ball"
+            result.append({"task_id": task_id, "filename": fname, "status": status})
+    return {"frames": result, "total": len(result)}
+
+
 @core.get("/api/export/yolo-dataset-hq")
 def api_export_hq_dataset(seed: int = 42, val_fraction: float = 0.2):
     """ZIP-Export aller als HQ getaggten Frames (YOLO-Format, Train/Val-Split)."""

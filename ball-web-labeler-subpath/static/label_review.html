@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Label Review</title>
-  <script defer src="static/label_review.js?v=8"></script>
+  <script defer src="static/label_review.js?v=9"></script>
   <style>
     :root {
       --bg: #0f172a;
@@ -223,6 +223,10 @@
           <select id="taskSelect">
             <option value="">(Tasks laden…)</option>
           </select>
+        </div>
+        <div style="display:flex; flex-direction:column; justify-content:flex-end; gap:4px;">
+          <button class="btn btn-hq" id="btnHqMode" type="button">★ Alle HQ-Frames</button>
+          <span id="hqModeInfo" class="muted" style="display:none; font-size:12px;"></span>
         </div>
         <span id="loadingTask" class="muted" style="display:none; margin-top:22px;">Lade…</span>
       </div>

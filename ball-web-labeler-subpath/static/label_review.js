@@ -33,6 +33,8 @@
   const btnRefreshGlobal = document.getElementById("btnRefreshGlobal");
   const taskSelect   = document.getElementById("taskSelect");
   const loadingTask  = document.getElementById("loadingTask");
+  const btnHqMode    = document.getElementById("btnHqMode");
+  const hqModeInfo   = document.getElementById("hqModeInfo");
   const statsCard    = document.getElementById("statsCard");
   const reviewCard   = document.getElementById("reviewCard");
   const statBall     = document.getElementById("statBall");
@@ -66,6 +68,12 @@
   let currentIndex    = 0;
   let busy            = false; // verhindert parallele API-Calls
   let currentHQ       = false;
+  let hqMode          = false;
+
+  // Gibt die task_id des aktuell angezeigten Frames zurück (HQ-Modus: aus Frame-Objekt)
+  function frameTaskId() {
+    return filteredFrames[currentIndex]?.task_id || currentTaskId || "";
+  }
 
   // ---- Status-Anzeige ----
   function setStatus(msg, isError = false) {
@@ -107,7 +115,11 @@
   // ---- Navigation ----
   function updateNav() {
     const total = filteredFrames.length;
-    navInfo.textContent = total > 0 ? `${currentIndex + 1} / ${total}` : "0 / 0";
+    let info = total > 0 ? `${currentIndex + 1} / ${total}` : "0 / 0";
+    if (hqMode && total > 0 && filteredFrames[currentIndex]?.task_id) {
+      info += ` · ${filteredFrames[currentIndex].task_id}`;
+    }
+    navInfo.textContent = info;
     btnPrev.disabled = currentIndex <= 0;
     btnNext.disabled = currentIndex >= total - 1;
   }
@@ -133,14 +145,14 @@
     labelBadge.textContent = "Lade…";
     labelBadge.className = "badge badge-none";
 
-    frameImg.src = API(`/api/task/${encodeURIComponent(currentTaskId)}/frame/${encodeURIComponent(filename)}`);
+    frameImg.src = API(`/api/task/${encodeURIComponent(frameTaskId())}/frame/${encodeURIComponent(filename)}`);
     await new Promise(res => { frameImg.onload = res; frameImg.onerror = res; });
 
     await Promise.all([refreshLabel(filename), loadHqStatus(filename)]);
   }
 
   async function refreshLabel(filename) {
-    const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label?filename=${encodeURIComponent(filename)}`));
+    const r = await fetch(API(`/api/task/${encodeURIComponent(frameTaskId())}/label?filename=${encodeURIComponent(filename)}`));
     if (!r.ok) { renderState([], "none"); return; }
     const d = await r.json();
     const boxes = Array.isArray(d.boxes) ? d.boxes : [];
@@ -198,7 +210,7 @@
   async function loadHqStatus(filename) {
     renderHqBtn(false);
     if (!currentTaskId || !filename) return;
-    const r = await fetch(API(`/api/frame-tag?source=labeler&task=${encodeURIComponent(currentTaskId)}&filename=${encodeURIComponent(filename)}`));
+    const r = await fetch(API(`/api/frame-tag?source=labeler&task=${encodeURIComponent(frameTaskId())}&filename=${encodeURIComponent(filename)}`));
     if (!r.ok) return;
     const d = await r.json();
     renderHqBtn(d.is_hq === true);
@@ -211,7 +223,7 @@
     const r = await fetch(API("/api/frame-tag"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: "labeler", task: currentTaskId, filename, tag: "hq", action: "toggle" }),
+      body: JSON.stringify({ source: "labeler", task: frameTaskId(), filename, tag: "hq", action: "toggle" }),
     });
     if (!r.ok) return;
     const d = await r.json();
@@ -221,17 +233,18 @@
 
   // ---- Aktionen ----
   async function actionOk() {
-    if (busy || !currentTaskId || filteredFrames.length === 0) return;
+    if (busy || filteredFrames.length === 0 || !frameTaskId()) return;
     advance();
   }
 
   async function actionNoball() {
-    if (busy || !currentTaskId || filteredFrames.length === 0) return;
+    const tid = frameTaskId();
+    if (busy || filteredFrames.length === 0 || !tid) return;
     busy = true;
     const filename = filteredFrames[currentIndex].filename;
     setStatus("Speichere 'Kein Ball'…");
     try {
-      const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label/empty`), {
+      const r = await fetch(API(`/api/task/${encodeURIComponent(tid)}/label/empty`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filename }),
@@ -258,13 +271,14 @@
   }
 
   async function actionDelete() {
-    if (busy || !currentTaskId || filteredFrames.length === 0) return;
+    const tid = frameTaskId();
+    if (busy || filteredFrames.length === 0 || !tid) return;
     busy = true;
     const filename = filteredFrames[currentIndex].filename;
     setStatus("Lösche Label…");
     try {
       const r = await fetch(
-        API(`/api/task/${encodeURIComponent(currentTaskId)}/label?filename=${encodeURIComponent(filename)}`),
+        API(`/api/task/${encodeURIComponent(tid)}/label?filename=${encodeURIComponent(filename)}`),
         { method: "DELETE" }
       );
       if (!r.ok) { setStatus(`Fehler: ${await errorText(r)}`, true); return; }
@@ -288,14 +302,15 @@
   }
 
   async function saveClickAt(filename, cx, cy) {
-    if (busy) return;
+    const tid = frameTaskId();
+    if (busy || !tid) return;
     busy = true;
     const nw    = frameImg.naturalWidth;
     const cw    = frameImg.clientWidth;
     const boxPx = Math.max(2, (parseFloat(boxSizeInput.value) || 24) * (nw / cw));
     setStatus("Speichere…");
     try {
-      const r = await fetch(API(`/api/task/${encodeURIComponent(currentTaskId)}/label`), {
+      const r = await fetch(API(`/api/task/${encodeURIComponent(tid)}/label`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filename, cx, cy, box: boxPx }),
@@ -340,6 +355,41 @@
     }
   }
 
+  // ---- HQ-Modus: alle Tasks ----
+  async function loadHqFrames() {
+    hqMode = true;
+    currentTaskId = null;
+    taskSelect.value = "";
+    loadingTask.style.display = "block";
+    statsCard.style.display = "none";
+    reviewCard.style.display = "none";
+    setStatus("Lade HQ-Frames…");
+
+    const r = await fetch(API("/api/frames-hq"));
+    loadingTask.style.display = "none";
+    if (!r.ok) { setStatus("Fehler beim Laden der HQ-Frames.", true); hqMode = false; return; }
+    const d = await r.json();
+    allFrames = Array.isArray(d.frames) ? d.frames : [];
+
+    if (allFrames.length === 0) {
+      setStatus("Keine HQ-getaggten Frames gefunden.");
+      hqMode = false;
+      btnHqMode.classList.remove("hq-active");
+      return;
+    }
+
+    btnHqMode.classList.add("hq-active");
+    hqModeInfo.textContent = `${allFrames.length} HQ-Frames aus allen Tasks`;
+    hqModeInfo.style.display = "block";
+
+    updateStats();
+    statsCard.style.display = "block";
+    reviewCard.style.display = "block";
+    currentFilter = "all";
+    filterTabs.forEach(t => t.classList.toggle("active", t.dataset.filter === "all"));
+    applyFilter("all");
+  }
+
   // ---- Task laden ----
   async function loadTasks() {
     const r = await fetch(API("/api/tasks"));
@@ -368,7 +418,10 @@
 
     if (!r.ok) { setStatus(`Fehler: ${await errorText(r)}`, true); return; }
     const d = await r.json();
-    allFrames = Array.isArray(d.frames) ? d.frames : [];
+    hqMode = false;
+    hqModeInfo.style.display = "none";
+    btnHqMode.classList.remove("hq-active");
+    allFrames = Array.isArray(d.frames) ? d.frames.map(f => ({ ...f, task_id: taskId })) : [];
 
     if (allFrames.length === 0) { setStatus("Keine Frames in diesem Task."); return; }
 
@@ -419,7 +472,7 @@
 
   // Klick auf Bild → sofort speichern und grünen Kreis zeigen
   frameImg.addEventListener("click", e => {
-    if (!currentTaskId || filteredFrames.length === 0 || busy) return;
+    if (!frameTaskId() || filteredFrames.length === 0 || busy) return;
     const filename = filteredFrames[currentIndex]?.filename;
     if (!filename) return;
     const nw = frameImg.naturalWidth, nh = frameImg.naturalHeight;
@@ -466,6 +519,7 @@
     }
   });
 
+  btnHqMode.addEventListener("click", () => void loadHqFrames());
   btnRefreshGlobal.addEventListener("click", () => void loadGlobalStats());
 
   // ---- Start ----
