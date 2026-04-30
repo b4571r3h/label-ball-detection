@@ -646,6 +646,8 @@ def api_task_frames_status(task_id: str):
     result = []
     stats = {"ball": 0, "empty": 0, "none": 0}
 
+    hq_tags = _load_tags(_labeler_tags_path(task_id))
+
     for filename in frames:
         stem = Path(filename).stem
         lab_path = labels_dir / f"{stem}.txt"
@@ -656,7 +658,7 @@ def api_task_frames_status(task_id: str):
         else:
             status = "empty"
         stats[status] += 1
-        result.append({"filename": filename, "status": status})
+        result.append({"filename": filename, "status": status, "hq": "hq" in hq_tags.get(filename, [])})
 
     return {"task_id": task_id, "frames": result, "stats": stats}
 

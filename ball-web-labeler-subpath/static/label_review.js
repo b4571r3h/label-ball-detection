@@ -103,7 +103,9 @@
   function applyFilter(filter) {
     currentFilter = filter;
     filterTabs.forEach(t => t.classList.toggle("active", t.dataset.filter === filter));
-    filteredFrames = filter === "all" ? [...allFrames] : allFrames.filter(f => f.status === filter);
+    filteredFrames = filter === "all"     ? [...allFrames] :
+                     filter === "not-hq"  ? allFrames.filter(f => !f.hq) :
+                     allFrames.filter(f => f.status === filter);
     currentIndex = 0;
     if (filteredFrames.length > 0) {
       void loadFrame(0);
@@ -233,6 +235,19 @@
     const d = await r.json();
     renderHqBtn(d.is_hq === true);
     setStatus(d.is_hq ? "★ Als HQ markiert." : "HQ-Tag entfernt.");
+
+    // frame.hq aktualisieren
+    const entry = allFrames.find(f => f.filename === filename && (f.task_id === frameTaskId() || !hqMode));
+    if (entry) entry.hq = d.is_hq;
+
+    // Im "Nicht HQ"-Filter: Frame verschwindet wenn es jetzt HQ ist
+    if (currentFilter === "not-hq" && d.is_hq) {
+      filteredFrames = allFrames.filter(f => !f.hq);
+      currentIndex = Math.min(currentIndex, Math.max(0, filteredFrames.length - 1));
+      updateNav();
+      if (filteredFrames.length > 0) void loadFrame(currentIndex);
+      else { frameImg.src = ""; labelOverlay.innerHTML = ""; setStatus("Alle Frames als HQ markiert. ✓"); }
+    }
   }
 
   // ---- Aktionen ----
