@@ -1291,20 +1291,20 @@ def api_set_frame_tag(body: FrameTagIn):
 
 @core.get("/api/frames-hq")
 def api_frames_hq():
-    """Alle HQ-getaggten Labeler-Frames über alle Tasks, mit Label-Status."""
+    """Alle HQ-getaggten Labeler-Frames über alle Tasks, mit Label-Status.
+    Funktioniert mit beliebiger Verzeichnistiefe (1- oder 2-stufige Task-Struktur)."""
     result = []
     if not DATA_DIR.is_dir():
         return {"frames": [], "total": 0}
-    for td in sorted(DATA_DIR.iterdir()):
-        if not td.is_dir() or td.name.startswith("_"):
-            continue
-        task_id = td.name
-        tags = _load_tags(_labeler_tags_path(task_id))
+    for tags_file in sorted(DATA_DIR.glob("**/frame_tags.json")):
+        task_d = tags_file.parent
+        task_id = str(task_d.relative_to(DATA_DIR))
+        tags = _load_tags(tags_file)
         hq_files = sorted(k for k, v in tags.items() if "hq" in v)
         if not hq_files:
             continue
-        frames_dir = td / "frames"
-        labels_dir = td / "labels"
+        frames_dir = task_d / "frames"
+        labels_dir = task_d / "labels"
         for fname in hq_files:
             if not (frames_dir / fname).exists():
                 continue
@@ -1312,8 +1312,7 @@ def api_frames_hq():
             if not lab.exists():
                 status = "none"
             else:
-                content = lab.read_text(encoding="utf-8", errors="ignore").strip()
-                status = "empty" if not content else "ball"
+                status = "empty" if not lab.read_text(encoding="utf-8", errors="ignore").strip() else "ball"
             result.append({"task_id": task_id, "filename": fname, "status": status})
     return {"frames": result, "total": len(result)}
 
@@ -1482,6 +1481,27 @@ def api_stats_frames_overview():
                 else:
                     import_empty += 1
 
+    # HQ-getaggte Frames zählen
+    hq_ball = 0
+    hq_empty = 0
+    if DATA_DIR.is_dir():
+        for tags_file in DATA_DIR.glob("**/frame_tags.json"):
+            task_d = tags_file.parent
+            frames_dir = task_d / "frames"
+            labels_dir = task_d / "labels"
+            for fname, tag_list in _load_tags(tags_file).items():
+                if "hq" not in tag_list:
+                    continue
+                if not (frames_dir / fname).exists():
+                    continue
+                lab = labels_dir / (Path(fname).stem + ".txt")
+                if not lab.exists():
+                    continue
+                if _is_yolo_label_with_ball(lab):
+                    hq_ball += 1
+                else:
+                    hq_empty += 1
+
     return {
         # App-Daten
         "ball": ball,
@@ -1496,6 +1516,10 @@ def api_stats_frames_overview():
         "combined_ball": ball + import_ball,
         "combined_empty": empty + import_empty,
         "combined_labeled": ball + empty + import_ball + import_empty,
+        # HQ-Datensatz
+        "hq_ball": hq_ball,
+        "hq_empty": hq_empty,
+        "hq_total": hq_ball + hq_empty,
     }
 
 

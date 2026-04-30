@@ -23,6 +23,10 @@
   const gStatEmpty       = document.getElementById("gStatEmpty");
   const gStatNone        = document.getElementById("gStatNone");
   const gStatTotal       = document.getElementById("gStatTotal");
+  const hqStatsWrap      = document.getElementById("hqStatsWrap");
+  const gStatHqBall      = document.getElementById("gStatHqBall");
+  const gStatHqEmpty     = document.getElementById("gStatHqEmpty");
+  const gStatHqTotal     = document.getElementById("gStatHqTotal");
   const importStatsWrap  = document.getElementById("importStatsWrap");
   const gStatImportBall  = document.getElementById("gStatImportBall");
   const gStatImportEmpty = document.getElementById("gStatImportEmpty");
@@ -209,7 +213,7 @@
 
   async function loadHqStatus(filename) {
     renderHqBtn(false);
-    if (!currentTaskId || !filename) return;
+    if (!filename || !frameTaskId()) return;
     const r = await fetch(API(`/api/frame-tag?source=labeler&task=${encodeURIComponent(frameTaskId())}&filename=${encodeURIComponent(filename)}`));
     if (!r.ok) return;
     const d = await r.json();
@@ -217,7 +221,7 @@
   }
 
   async function toggleHq() {
-    if (!currentTaskId || filteredFrames.length === 0) return;
+    if (!frameTaskId() || filteredFrames.length === 0) return;
     const filename = filteredFrames[currentIndex]?.filename;
     if (!filename) return;
     const r = await fetch(API("/api/frame-tag"), {
@@ -340,6 +344,16 @@
     gStatNone.textContent  = (d.none  ?? 0).toLocaleString("de-DE");
     const appLabeled = (d.ball ?? 0) + (d.empty ?? 0);
     gStatTotal.textContent = `${appLabeled.toLocaleString("de-DE")} gelabelt · ${(d.total ?? 0).toLocaleString("de-DE")} gesamt`;
+
+    // HQ-Datensatz
+    if ((d.hq_total ?? 0) > 0) {
+      hqStatsWrap.style.display = "block";
+      gStatHqBall.textContent  = (d.hq_ball  ?? 0).toLocaleString("de-DE");
+      gStatHqEmpty.textContent = (d.hq_empty ?? 0).toLocaleString("de-DE");
+      gStatHqTotal.textContent = `${(d.hq_total ?? 0).toLocaleString("de-DE")} gesamt`;
+    } else {
+      hqStatsWrap.style.display = "none";
+    }
 
     // Import
     if ((d.import_total ?? 0) > 0) {
