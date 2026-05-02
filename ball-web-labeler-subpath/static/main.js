@@ -151,6 +151,10 @@
   const taskYtInput = document.getElementById("task-yt");
   const ytBtn = document.getElementById("btn-yt");
   const btnYtSave = document.getElementById("btn-yt-save");
+  const ytStartTimeInput = document.getElementById("yt-start-time");
+  const ytPreview = document.getElementById("yt-preview");
+  const ytThumb = document.getElementById("yt-thumb");
+  const ytThumbTitle = document.getElementById("yt-thumb-title");
   const ytCookieStatus  = document.getElementById("yt-cookie-status");
   const ytCookieFile    = document.getElementById("yt-cookie-file");
   const btnCookieUpload = document.getElementById("btn-cookie-upload");
@@ -196,6 +200,7 @@
   uploadBtn.addEventListener("click", handleUpload);
   ytBtn.addEventListener("click", handleYouTube);
   btnYtSave.addEventListener("click", handleSaveYouTubeVideo);
+  ytUrlInput.addEventListener("input", updateYtPreview);
   fileInput.addEventListener("change", (e) => {
     if (e.target.files.length > 0) {
       uploadBtn.textContent = `Upload ${e.target.files[0].name}`;
@@ -434,15 +439,50 @@
     }
   }
 
+  function extractYtVideoId(url) {
+    try {
+      const u = new URL(url);
+      if (u.hostname === "youtu.be") return u.pathname.slice(1).split("?")[0];
+      if (u.hostname.includes("youtube.com")) {
+        return u.searchParams.get("v") || u.pathname.split("/").pop();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function updateYtPreview() {
+    const videoId = extractYtVideoId(ytUrlInput.value.trim());
+    if (!videoId) {
+      ytPreview.style.display = "none";
+      return;
+    }
+    ytThumb.src = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+    ytThumbTitle.textContent = videoId;
+    ytThumb.onerror = () => { ytPreview.style.display = "none"; };
+    ytThumb.onload = () => { ytPreview.style.display = "block"; };
+  }
+
+  function parseStartTimeSecs(val) {
+    // Akzeptiert "1:30", "90", "1:30:00"
+    const parts = val.trim().split(":").map(Number);
+    if (parts.some(isNaN)) return 0;
+    if (parts.length === 1) return parts[0];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+
   async function handleSaveYouTubeVideo() {
     const url = ytUrlInput.value.trim();
     if (!url) {
       setStatus("Bitte eine YouTube-URL eingeben");
       return;
     }
+    const startSecs = parseStartTimeSecs(ytStartTimeInput.value);
     const formData = new FormData();
     formData.append("url", url);
-    setStatus("Video wird heruntergeladen und gespeichert (erste 2 Min)...");
+    formData.append("start_time", startSecs);
+    const startLabel = ytStartTimeInput.value.trim() || "0:00";
+    setStatus(`Video wird heruntergeladen (2 Min ab ${startLabel})...`);
     btnYtSave.disabled = true;
     try {
       const response = await fetch(API("/api/save-youtube-video"), {

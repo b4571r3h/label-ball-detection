@@ -344,8 +344,8 @@ def download_youtube(url: str) -> Path:
     return p
 
 
-def save_youtube_video_2min(url: str) -> Path:
-    """Lädt die ersten 2 Minuten eines YouTube-Videos und speichert es in YOUTUBE_VIDEOS_DIR."""
+def save_youtube_video_2min(url: str, start_time: int = 0) -> Path:
+    """Lädt 2 Minuten eines YouTube-Videos ab start_time und speichert es in YOUTUBE_VIDEOS_DIR."""
     try:
         import yt_dlp  # type: ignore
     except Exception as e:
@@ -361,8 +361,8 @@ def save_youtube_video_2min(url: str) -> Path:
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
-        # Nur erste 2 Minuten herunterladen
-        "download_ranges": yt_dlp.utils.download_range_func(None, [(0, 120)]),
+        # 2 Minuten ab start_time herunterladen
+        "download_ranges": yt_dlp.utils.download_range_func(None, [(start_time, start_time + 120)]),
         "force_keyframes_at_cuts": True,
     }
     cookies_path = DATA_DIR / "yt_cookies.txt"
@@ -693,11 +693,11 @@ def api_ingest_youtube(
 # -------------------- YouTube-Video speichern --------------------
 
 @core.post("/api/save-youtube-video")
-def api_save_youtube_video(url: str = Form(...)):
-    """Lädt die ersten 2 Minuten eines YouTube-Videos und speichert es in YOUTUBE_VIDEOS_DIR."""
+def api_save_youtube_video(url: str = Form(...), start_time: int = Form(0)):
+    """Lädt 2 Minuten eines YouTube-Videos ab start_time und speichert es in YOUTUBE_VIDEOS_DIR."""
     if not url.startswith("http"):
         raise HTTPException(400, "Ungültige URL")
-    dest = save_youtube_video_2min(url)
+    dest = save_youtube_video_2min(url, start_time=max(0, start_time))
     return {"filename": dest.name, "path": str(dest)}
 
 
