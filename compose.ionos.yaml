@@ -13,10 +13,12 @@ services:
       # YOLO-Daten (images/train|val, labels/train|val) — auf dem Host nach ./ball-yolo-import/ball_det/ legen (z. B. per rsync vom Mac)
       - IMPORT_YOLO_BALL_DIR=/data/yolo-import
       - EVAL_MODELS_DIR=/data/eval-models
+      - YOUTUBE_VIDEOS_DIR=/data/youtube-videos
     volumes:
       - ./ball-web-labeler-subpath/data:/data/labels
       - ./ball-yolo-import/ball_det:/data/yolo-import
       - ./eval-models:/data/eval-models
+      - ./youtube-videos:/data/youtube-videos
     restart: unless-stopped
 
   # Ball Analyzer (neue App)

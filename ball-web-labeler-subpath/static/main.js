@@ -150,6 +150,7 @@
   const fpsYtInput = document.getElementById("fps-yt");
   const taskYtInput = document.getElementById("task-yt");
   const ytBtn = document.getElementById("btn-yt");
+  const btnYtSave = document.getElementById("btn-yt-save");
   const ytCookieStatus  = document.getElementById("yt-cookie-status");
   const ytCookieFile    = document.getElementById("yt-cookie-file");
   const btnCookieUpload = document.getElementById("btn-cookie-upload");
@@ -194,6 +195,7 @@
   // ---- Event Listeners ----
   uploadBtn.addEventListener("click", handleUpload);
   ytBtn.addEventListener("click", handleYouTube);
+  btnYtSave.addEventListener("click", handleSaveYouTubeVideo);
   fileInput.addEventListener("change", (e) => {
     if (e.target.files.length > 0) {
       uploadBtn.textContent = `Upload ${e.target.files[0].name}`;
@@ -429,6 +431,34 @@
       setStatus(`❌ YouTube Download Fehler: ${error.message}`);
     } finally {
       ytBtn.disabled = false;
+    }
+  }
+
+  async function handleSaveYouTubeVideo() {
+    const url = ytUrlInput.value.trim();
+    if (!url) {
+      setStatus("Bitte eine YouTube-URL eingeben");
+      return;
+    }
+    const formData = new FormData();
+    formData.append("url", url);
+    setStatus("Video wird heruntergeladen und gespeichert (erste 2 Min)...");
+    btnYtSave.disabled = true;
+    try {
+      const response = await fetch(API("/api/save-youtube-video"), {
+        method: "POST",
+        body: formData
+      });
+      if (!response.ok) {
+        setStatus(`❌ Speichern fehlgeschlagen (${response.status}): ${await errorTextFromResponse(response)}`);
+        return;
+      }
+      const result = await response.json();
+      setStatus(`✅ Video gespeichert: ${result.filename}`);
+    } catch (error) {
+      setStatus(`❌ Fehler beim Speichern: ${error.message}`);
+    } finally {
+      btnYtSave.disabled = false;
     }
   }
 

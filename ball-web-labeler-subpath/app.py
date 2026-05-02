@@ -134,6 +134,10 @@ LABEL_VIDEO_CLEANUP_INTERVAL_SEC = int(os.getenv("LABEL_VIDEO_CLEANUP_INTERVAL_S
 
 ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 
+# Ordner für gespeicherte YouTube-Rohvideos (erste 2 Min)
+YOUTUBE_VIDEOS_DIR = Path(os.getenv("YOUTUBE_VIDEOS_DIR", DATA_DIR / "youtube-videos")).resolve()
+YOUTUBE_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+
 # Ordnerstruktur pro Task:
 #   data/
 #     <task_id>/
@@ -338,6 +342,69 @@ def download_youtube(url: str) -> Path:
             raise HTTPException(500, "yt-dlp hat keine Datei erzeugt")
         p = max(cand, key=lambda x: x.stat().st_mtime)
     return p
+
+
+def save_youtube_video_2min(url: str) -> Path:
+    """Lädt die ersten 2 Minuten eines YouTube-Videos und speichert es in YOUTUBE_VIDEOS_DIR."""
+    try:
+        import yt_dlp  # type: ignore
+    except Exception as e:
+        raise HTTPException(500, "yt-dlp nicht installiert") from e
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="yt_save_"))
+    outtmpl = str(tmpdir / "%(title).200s.%(ext)s")
+    ydl_opts = {
+        "outtmpl": outtmpl,
+        "format": "bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best",
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        # Nur erste 2 Minuten herunterladen
+        "download_ranges": yt_dlp.utils.download_range_func(None, [(0, 120)]),
+        "force_keyframes_at_cuts": True,
+    }
+    cookies_path = DATA_DIR / "yt_cookies.txt"
+    if cookies_path.exists():
+        ydl_opts["cookiefile"] = str(cookies_path)
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "video")
+            file = ydl.prepare_filename(info)
+    except yt_dlp.utils.DownloadError as e:
+        msg = str(e)
+        print(f"yt-dlp DownloadError (save): {msg}")
+        if "Sign in to confirm" in msg or "age-restricted" in msg or "age restricted" in msg:
+            hint = f"Video erfordert Login / ist altersbeschränkt. (yt-dlp: {msg.split(chr(10))[0]})"
+        elif "Private video" in msg:
+            hint = "Video ist privat."
+        elif "Video unavailable" in msg or "not available" in msg:
+            hint = "Video nicht verfügbar (gesperrt oder gelöscht)."
+        elif "HTTP Error 429" in msg or "Too Many Requests" in msg:
+            hint = "YouTube rate-limit (429). Kurz warten und erneut versuchen."
+        else:
+            hint = msg.split("\n")[0]
+        raise HTTPException(422, f"YouTube-Download fehlgeschlagen: {hint}") from e
+    except Exception as e:
+        raise HTTPException(500, f"Unerwarteter Fehler beim YouTube-Download: {e}") from e
+
+    src = Path(file)
+    if not src.exists():
+        cand = list(tmpdir.glob("*"))
+        if not cand:
+            raise HTTPException(500, "yt-dlp hat keine Datei erzeugt")
+        src = max(cand, key=lambda x: x.stat().st_mtime)
+
+    # Sicherer Dateiname: Timestamp-Präfix + Originaltitel (bereinigt)
+    safe_title = re.sub(r'[^\w\-_.()\[\] ]', '_', title)[:100].strip()
+    timestamp = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    dest = YOUTUBE_VIDEOS_DIR / f"{timestamp}_{safe_title}{src.suffix}"
+    shutil.move(str(src), str(dest))
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    return dest
 
 
 def list_frames(task_id: str) -> List[str]:
@@ -621,6 +688,17 @@ def api_ingest_youtube(
     write_meta(td, meta)
 
     return {"task_id": tid, "frames": n, "meta": meta}
+
+
+# -------------------- YouTube-Video speichern --------------------
+
+@core.post("/api/save-youtube-video")
+def api_save_youtube_video(url: str = Form(...)):
+    """Lädt die ersten 2 Minuten eines YouTube-Videos und speichert es in YOUTUBE_VIDEOS_DIR."""
+    if not url.startswith("http"):
+        raise HTTPException(400, "Ungültige URL")
+    dest = save_youtube_video_2min(url)
+    return {"filename": dest.name, "path": str(dest)}
 
 
 # -------------------- Frames auflisten/ausliefern --------------------
