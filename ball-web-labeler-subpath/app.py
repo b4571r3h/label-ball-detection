@@ -2874,6 +2874,7 @@ def mim_review(
     filter: str = Query("pending"),
     offset: int = Query(0),
     limit: int = Query(20),
+    has_ball: Optional[str] = Query(None),  # "true" | "false" | None = alle
 ):
     job = _mim_load_job()
     all_frames = job.get("frames", [])
@@ -2885,6 +2886,10 @@ def mim_review(
         filtered = [f for f in all_frames if f["reviewed"] and not f.get("approved")]
     else:
         filtered = all_frames
+    if has_ball == "true":
+        filtered = [f for f in filtered if f.get("prediction") is not None]
+    elif has_ball == "false":
+        filtered = [f for f in filtered if f.get("prediction") is None]
     return {
         "total": len(filtered),
         "offset": offset,

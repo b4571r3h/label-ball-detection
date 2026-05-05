@@ -111,6 +111,21 @@
     .hint-bar-left  { color: rgba(34,197,94,0.6); }
     .hint-bar-right { color: rgba(148,163,184,0.6); }
 
+    /* Filter-Leiste */
+    #filterBar {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 5px; z-index: 10;
+    }
+    .filter-btn {
+      background: rgba(15,23,42,0.75); border: 1px solid #374151;
+      color: #94a3b8; font-size: 11px; font-weight: 600;
+      padding: 4px 10px; border-radius: 20px; cursor: pointer;
+      backdrop-filter: blur(4px); white-space: nowrap;
+    }
+    .filter-btn.filter-active {
+      background: rgba(34,211,238,0.2); border-color: #22d3ee; color: #22d3ee;
+    }
+
     /* Done-Overlay */
     #doneOverlay {
       position: absolute; inset: 0;
@@ -142,6 +157,13 @@
         </div>
       </div>
     </div>
+    <!-- Filter-Leiste -->
+    <div id="filterBar">
+      <button class="filter-btn filter-active" data-ball-filter="all">Alle</button>
+      <button class="filter-btn" data-ball-filter="true">Mit Ball</button>
+      <button class="filter-btn" data-ball-filter="false">Ohne Ball</button>
+    </div>
+
     <!-- Richtungs-Hints an Seiten -->
     <div class="hint hint-left">Freigeben</div>
     <div class="hint hint-right">Überspringen</div>

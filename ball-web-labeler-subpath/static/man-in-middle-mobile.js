@@ -25,19 +25,19 @@
 
   // ---- State ----
   const BATCH        = 10;
-  const SWIPE_THRESH = 70;       // px to trigger action
-  const CROP_PAD     = 2.8;      // BB-size × this = crop width (tight)
+  const SWIPE_THRESH = 70;
   const CANVAS_W     = 540;
   const CANVAS_H     = 960;
 
-  let queue      = [];           // prefetched frames not yet shown
-  let fetchOffset = 0;
-  let totalPending = 0;
-  let current    = null;         // currently displayed frame
-  let currentImg = null;         // loaded Image for current frame
-  let isFetching = false;
-  let isAnimating = false;
-  let imageCache = new Map();    // key → Image
+  let hasBallFilter = null;      // null | "true" | "false"
+  let queue         = [];
+  let fetchOffset   = 0;
+  let totalPending  = 0;
+  let current       = null;
+  let currentImg    = null;
+  let isFetching    = false;
+  let isAnimating   = false;
+  let imageCache    = new Map();
 
   // Touch state
   let touchStartX = 0;
@@ -51,22 +51,34 @@
   fetchBatch().then(() => showNext());
 
   // ---- Fetch ----
+  function buildReviewUrl(offset) {
+    let url = `/api/man-in-middle/review?filter=pending&offset=${offset}&limit=${BATCH}`;
+    if (hasBallFilter !== null) url += `&has_ball=${hasBallFilter}`;
+    return API(url);
+  }
+
   async function fetchBatch() {
     if (isFetching) return;
     isFetching = true;
     try {
-      const r = await fetch(API(`/api/man-in-middle/review?filter=pending&offset=${fetchOffset}&limit=${BATCH}`));
+      const r = await fetch(buildReviewUrl(fetchOffset));
       const d = await r.json();
       totalPending = d.total;
       queue.push(...d.frames);
       fetchOffset += d.frames.length;
-      // Preload images for first 3 in queue
       queue.slice(0, 3).forEach(preloadImage);
     } catch (e) {
       console.error("Fetch error", e);
     } finally {
       isFetching = false;
     }
+  }
+
+  function resetQueue() {
+    queue        = [];
+    fetchOffset  = 0;
+    totalPending = 0;
+    imageCache.clear();
   }
 
   function imageKey(frame) {
@@ -260,35 +272,37 @@
   });
 
   // ---- Action ----
-  function triggerAction(action) {
+  async function triggerAction(action) {
     if (isAnimating || !current) return;
     isAnimating = true;
 
     const toX = action === "approve" ? "-130vw" : "130vw";
     const rot  = action === "approve" ? "-20deg" : "20deg";
-
     card.style.transition = "transform 0.35s ease-out, opacity 0.3s ease";
     card.style.transform  = `translateX(${toX}) rotate(${rot})`;
     card.style.opacity    = "0";
 
-    const frame = current;
+    const frame    = current;
     const endpoint = action === "approve" ? "/api/man-in-middle/approve" : "/api/man-in-middle/skip";
 
-    fetch(API(endpoint), {
+    // Animation und Save parallel – warten bis beides fertig
+    const savePromise = fetch(API(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ task_id: frame.task_id, filename: frame.filename }),
-    }).catch(console.error);
+    }).then(async r => {
+      if (!r.ok) console.error("Save error", r.status, await r.json().catch(() => ({})));
+    }).catch(e => console.error("Save error", e));
 
-    if (action === "approve") totalPending--;
+    await Promise.all([savePromise, new Promise(res => setTimeout(res, 370))]);
 
-    setTimeout(() => {
-      isAnimating = false;
-      card.style.transition = "none";
-      card.style.transform  = "translateX(0) rotate(0deg)";
-      card.style.opacity    = "1";
-      showNext();
-    }, 370);
+    if (action === "approve") totalPending = Math.max(0, totalPending - 1);
+
+    isAnimating = false;
+    card.style.transition = "none";
+    card.style.transform  = "translateX(0) rotate(0deg)";
+    card.style.opacity    = "1";
+    showNext();
   }
 
   function resetCardPosition() {
@@ -302,4 +316,20 @@
     loadingMsg.style.display  = "none";
     counter.textContent = "Fertig";
   }
+
+  // ---- Filter-Buttons ----
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-ball-filter]");
+    if (!btn) return;
+    hasBallFilter = btn.dataset.ballFilter === "all" ? null : btn.dataset.ballFilter;
+    document.querySelectorAll("[data-ball-filter]").forEach(b =>
+      b.classList.toggle("filter-active", b === btn)
+    );
+    resetQueue();
+    current = null;
+    doneOverlay.style.display = "none";
+    loadingMsg.style.display  = "flex";
+    loadingMsg.textContent    = "Wird geladen…";
+    fetchBatch().then(() => showNext());
+  });
 })();
