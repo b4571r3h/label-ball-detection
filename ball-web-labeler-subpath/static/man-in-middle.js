@@ -32,8 +32,24 @@
   const btnNext          = document.getElementById("btnNext");
   const pageInfo         = document.getElementById("pageInfo");
   const linkBack         = document.getElementById("linkBack");
+  const btnShareMobile   = document.getElementById("btnShareMobile");
+  const shareStatus      = document.getElementById("shareStatus");
 
   linkBack.href = API("/");
+
+  // ---- Share Mobile Link ----
+  btnShareMobile.addEventListener("click", () => {
+    const url = "https://balls.spinevo.app/man-in-middle/mobile";
+    if (navigator.share) {
+      navigator.share({ title: "MitM Review", url });
+    } else {
+      navigator.clipboard.writeText(url).then(() => {
+        shareStatus.textContent = "Link kopiert: " + url;
+        shareStatus.style.display = "inline";
+        setTimeout(() => { shareStatus.style.display = "none"; }, 3000);
+      });
+    }
+  });
 
   // ---- State ----
   let currentFilter = "pending";

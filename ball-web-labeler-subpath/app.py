@@ -2805,6 +2805,11 @@ def mim_html():
     return FileResponse(str(STATIC_DIR / "man-in-middle.html"))
 
 
+@core.get("/man-in-middle/mobile", include_in_schema=False)
+def mim_mobile_html():
+    return FileResponse(str(STATIC_DIR / "man-in-middle-mobile.html"))
+
+
 @core.post("/api/man-in-middle/weights")
 async def mim_upload_weights(file: UploadFile = File(...)):
     if not file.filename.endswith(".pt"):
