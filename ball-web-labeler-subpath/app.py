@@ -1450,9 +1450,10 @@ def api_export_hq_dataset(seed: int = 42, val_fraction: float = 0.2):
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("dataset.yaml", "path: .\ntrain: images/train\nval: images/val\nnc: 1\nnames: ['ball']\n")
         for split_name, split_pairs in [("train", train_pairs), ("val", val_pairs)]:
-            for img_p, lab_p in split_pairs:
-                zf.write(img_p, arcname=f"images/{split_name}/{img_p.name}")
-                zf.write(lab_p, arcname=f"labels/{split_name}/{lab_p.stem}.txt")
+            for idx, (img_p, lab_p) in enumerate(split_pairs):
+                stem = f"{idx:06d}"
+                zf.write(img_p, arcname=f"images/{split_name}/{stem}.jpg")
+                zf.write(lab_p, arcname=f"labels/{split_name}/{stem}.txt")
 
     return FileResponse(str(zip_path), media_type="application/zip", filename="spinevo-yolo-hq.zip")
 
