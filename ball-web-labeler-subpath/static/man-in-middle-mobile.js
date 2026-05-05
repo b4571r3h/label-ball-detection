@@ -149,23 +149,22 @@
       return;
     }
 
-    // Ball erkannt: enges Crop um den Ball
+    // Ball erkannt: volle Bildhöhe, horizontal auf 9:16 zuschneiden
     const { x, y, w, h } = prediction;
     const ball_cx = x * iw;
     const ball_cy = y * ih;
     const ball_pw = w * iw;
     const ball_ph = h * ih;
 
-    // Crop-Breite = max(ball_w, ball_h) * CROP_PAD
-    const crop_w = Math.max(ball_pw, ball_ph) * CROP_PAD;
-    // Crop-Höhe: 9:16 Verhältnis (CANVAS_H/CANVAS_W)
-    const crop_h = crop_w * (CANVAS_H / CANVAS_W);
+    // Volle Höhe, Breite = Höhe * (9/16)
+    const crop_h = ih;
+    const crop_w = ih * (CANVAS_W / CANVAS_H);
 
-    // Crop zentriert auf Ball, geclampt auf Bildgrenzen
+    // Horizontal auf Ball zentrieren, geclampt
     let sx = Math.max(0, Math.min(ball_cx - crop_w / 2, iw - crop_w));
-    let sy = Math.max(0, Math.min(ball_cy - crop_h / 2, ih - crop_h));
+    let sy = 0;
     const sw = Math.min(crop_w, iw - sx);
-    const sh = Math.min(crop_h, ih - sy);
+    const sh = crop_h;
 
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, CANVAS_W, CANVAS_H);
 
