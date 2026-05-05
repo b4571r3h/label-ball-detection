@@ -30,6 +30,10 @@
   if (linkLabelReview) {
     linkLabelReview.href = `${ROOT}/label-review/`;
   }
+  const linkRallyLabel = document.getElementById("linkRallyLabel");
+  if (linkRallyLabel) {
+    linkRallyLabel.href = `${ROOT}/rally-label/`;
+  }
 
   async function errorTextFromResponse(response) {
     const text = await response.text();

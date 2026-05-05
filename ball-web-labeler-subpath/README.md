@@ -79,3 +79,32 @@ Authorization: Bearer <gleicher Wert wie BALL_DETECTION_EXPORT_API_KEY>
 ### Hinweis zu großen Datenmengen
 
 Der Voll-Export baut die ZIP-Datei synchron auf dem Server (Temp-Datei). Bei sehr vielen Bildern können Timeouts auftreten — dann einen asynchronen Export (Job + späterer Download) ergänzen.
+
+## Rally-Labeling (neu)
+
+Das Rally-Tool ist jetzt im Labeler integriert und unter folgender UI erreichbar:
+
+- `/rally-label/`
+- Einstieg auch über den Button **Rally-Labeling** auf der Startseite
+
+### Workflow
+
+1. Task auswählen und laden
+2. Mit `←` / `→` durch Frames navigieren
+3. Mit `S` Rally-Start und mit `E` Rally-Ende setzen
+4. Mit `D` alle Events auf dem aktuellen Frame löschen
+5. Über **Speichern** persistieren
+
+### Gespeicherte Dateien pro Task
+
+Unter `LABEL_DATA_DIR/<task_id>/`:
+
+- `rally_labels.json` (Events + Metadaten)
+- `rally_timeseries.csv` (frameweise Zeitreihe inkl. Labelcode)
+
+### Relevante API-Endpunkte
+
+- `GET /api/rally/tasks`
+- `GET /api/rally/task/{task_id}/points`
+- `GET /api/rally/task/{task_id}/labels`
+- `POST /api/rally/task/{task_id}/labels`

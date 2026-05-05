@@ -475,6 +475,16 @@ class TableLabelIn(BaseModel):
     keypoints: list[TableKeypointIn]  # genau 6: TL TR BR BL Netz-L Netz-R
 
 
+class RallyEventIn(BaseModel):
+    frame: int
+    kind: str  # "start" | "end"
+
+
+class RallySaveIn(BaseModel):
+    events: list[RallyEventIn]
+    sync_offset_frames: int = 0
+
+
 # ---------------------------------------------------------------------
 # FastAPI Apps (Core + Wrapper für Subpfad)
 # ---------------------------------------------------------------------
@@ -523,6 +533,12 @@ def label_review_html():
 def table_labeling_html():
     """Tisch-Keypoint-Labeling (4 Ecken + Netz für YOLO-Pose)."""
     return FileResponse(str(STATIC_DIR / "table_labeling.html"))
+
+
+@core.get("/rally-label", include_in_schema=False)
+def rally_label_html():
+    """Rally-Labeling (Start/Ende je Frame auf Basis vorhandener Ball-Labels)."""
+    return FileResponse(str(STATIC_DIR / "rally_label.html"))
 
 
 @core.get("/import-review", include_in_schema=False)
@@ -1699,6 +1715,238 @@ def api_task_frame_image(task_id: str, filename: str):
         raise HTTPException(404, "Frame nicht gefunden")
     # Content-Type: image/jpeg wird von FileResponse korrekt gesetzt
     return FileResponse(str(img))
+
+
+def _iter_task_dirs() -> list[tuple[str, Path]]:
+    out: list[tuple[str, Path]] = []
+    if not DATA_DIR.is_dir():
+        return out
+    for day in sorted(DATA_DIR.iterdir()):
+        if not day.is_dir():
+            continue
+        for t in sorted(day.iterdir()):
+            if not t.is_dir():
+                continue
+            rel = str(t.relative_to(DATA_DIR))
+            out.append((rel, t))
+    return out
+
+
+def _read_yolo_ball_center_px(label_path: Path, img_w: int, img_h: int) -> tuple[float, float] | None:
+    """Liest die erste YOLO-Box und gibt Mittelpunkt in Pixelkoordinaten zurück."""
+    try:
+        text = label_path.read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        return None
+    if not text:
+        return None
+    for raw in text.splitlines():
+        parts = raw.strip().split()
+        if len(parts) < 5:
+            continue
+        try:
+            cx_n = float(parts[1])
+            cy_n = float(parts[2])
+        except Exception:
+            continue
+        return (max(0.0, min(1.0, cx_n)) * img_w, max(0.0, min(1.0, cy_n)) * img_h)
+    return None
+
+
+def _rally_paths(task_id: str) -> tuple[Path, Path]:
+    td = task_dir(task_id)
+    return td / "rally_labels.json", td / "rally_timeseries.csv"
+
+
+def _build_rally_timeseries_csv(
+    frames: list[str],
+    points_map: dict[str, tuple[float, float] | None],
+    event_map: dict[int, list[str]],
+) -> str:
+    """
+    Kompakte Zeitreihe:
+    frame,filename,x,y,label
+      label: 0=kein_event, 1=start, 2=end, 3=start_und_ende
+    """
+    out = io.StringIO()
+    out.write("frame,filename,x,y,label\n")
+    for i, fname in enumerate(frames):
+        point = points_map.get(fname)
+        x = "" if point is None else f"{point[0]:.3f}"
+        y = "" if point is None else f"{point[1]:.3f}"
+        kinds = set(event_map.get(i, []))
+        if "start" in kinds and "end" in kinds:
+            label = 3
+        elif "start" in kinds:
+            label = 1
+        elif "end" in kinds:
+            label = 2
+        else:
+            label = 0
+        out.write(f"{i},{fname},{x},{y},{label}\n")
+    return out.getvalue()
+
+
+@core.get("/api/rally/tasks")
+def api_rally_tasks():
+    """
+    Listet Tasks für Rally-Labeling.
+    Ein Task ist nutzbar, wenn Frames vorhanden sind.
+    """
+    items = []
+    for tid, td in _iter_task_dirs():
+        frames_dir = td / "frames"
+        labels_dir = td / "labels"
+        frames = sorted(frames_dir.glob("*.jpg")) if frames_dir.is_dir() else []
+        if not frames:
+            continue
+        labeled = 0
+        for img in frames:
+            lab = labels_dir / f"{img.stem}.txt"
+            if lab.exists():
+                labeled += 1
+        rally_json, _ = _rally_paths(tid)
+        items.append(
+            {
+                "task_id": tid,
+                "frames_total": len(frames),
+                "frames_with_label_file": labeled,
+                "has_rally_labels": rally_json.exists(),
+            }
+        )
+    return {"tasks": items}
+
+
+@core.get("/api/rally/task/{task_id:path}/points")
+def api_rally_task_points(task_id: str):
+    """
+    Liefert pro Frame den Ballpunkt (Pixel) aus YOLO-Labels, falls vorhanden.
+    """
+    td = task_dir(task_id)
+    frames = sorted((td / "frames").glob("*.jpg"))
+    if not frames:
+        raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
+    labels_dir = td / "labels"
+    rows = []
+    for idx, img_path in enumerate(frames):
+        fname = img_path.name
+        try:
+            with Image.open(img_path) as im:
+                w, h = im.size
+        except Exception:
+            w, h = 0, 0
+        point = None
+        lab = labels_dir / f"{img_path.stem}.txt"
+        if lab.exists() and w > 0 and h > 0:
+            point = _read_yolo_ball_center_px(lab, w, h)
+        rows.append(
+            {
+                "frame": idx,
+                "filename": fname,
+                "x": None if point is None else round(point[0], 3),
+                "y": None if point is None else round(point[1], 3),
+                "width": w,
+                "height": h,
+            }
+        )
+    return {"task_id": task_id, "rows": rows}
+
+
+@core.get("/api/rally/task/{task_id:path}/labels")
+def api_rally_task_get_labels(task_id: str):
+    rally_json, _ = _rally_paths(task_id)
+    if not rally_json.exists():
+        return {"task_id": task_id, "exists": False, "events": [], "sync_offset_frames": 0}
+    try:
+        raw = json.loads(rally_json.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(500, "Rally-JSON ist ungültig.")
+    events = raw.get("events", [])
+    cleaned = []
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        f = e.get("frame")
+        k = e.get("kind")
+        if not isinstance(f, int):
+            continue
+        if k not in ("start", "end"):
+            continue
+        cleaned.append({"frame": f, "kind": k})
+    sync_offset = raw.get("sync_offset_frames", 0)
+    if not isinstance(sync_offset, int):
+        sync_offset = 0
+    return {
+        "task_id": task_id,
+        "exists": True,
+        "events": cleaned,
+        "sync_offset_frames": sync_offset,
+    }
+
+
+@core.post("/api/rally/task/{task_id:path}/labels")
+def api_rally_task_save_labels(task_id: str, body: RallySaveIn):
+    td = task_dir(task_id)
+    frames = sorted((td / "frames").glob("*.jpg"))
+    if not frames:
+        raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
+    events = []
+    for e in body.events:
+        if e.kind not in ("start", "end"):
+            continue
+        if e.frame < 0 or e.frame >= len(frames):
+            continue
+        events.append({"frame": int(e.frame), "kind": e.kind})
+    # dedupe/sort
+    dedup = {}
+    for e in events:
+        dedup[(e["frame"], e["kind"])] = e
+    events = sorted(dedup.values(), key=lambda x: (x["frame"], x["kind"]))
+
+    rally_json_path, rally_csv_path = _rally_paths(task_id)
+    payload = {
+        "task_id": task_id,
+        "created_at": dt.datetime.utcnow().isoformat() + "Z",
+        "num_frames": len(frames),
+        "sync_offset_frames": int(body.sync_offset_frames),
+        "label_map": {
+            "0": "kein_event",
+            "1": "ballwechsel_start",
+            "2": "ballwechsel_ende",
+            "3": "start_und_ende",
+        },
+        "events": events,
+    }
+    rally_json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    points_map: dict[str, tuple[float, float] | None] = {}
+    labels_dir = td / "labels"
+    for img_path in frames:
+        fname = img_path.name
+        lab = labels_dir / f"{img_path.stem}.txt"
+        if not lab.exists():
+            points_map[fname] = None
+            continue
+        try:
+            with Image.open(img_path) as im:
+                w, h = im.size
+        except Exception:
+            points_map[fname] = None
+            continue
+        points_map[fname] = _read_yolo_ball_center_px(lab, w, h)
+    event_map: dict[int, list[str]] = defaultdict(list)
+    for e in events:
+        event_map[e["frame"]].append(e["kind"])
+    rally_csv = _build_rally_timeseries_csv([f.name for f in frames], points_map, event_map)
+    rally_csv_path.write_text(rally_csv, encoding="utf-8")
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "json_file": str(rally_json_path.relative_to(td)),
+        "csv_file": str(rally_csv_path.relative_to(td)),
+        "events_saved": len(events),
+    }
 
 
 # -------------------- Label speichern (YOLO-Format) --------------------
