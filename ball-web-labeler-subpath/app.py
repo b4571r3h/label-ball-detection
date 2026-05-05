@@ -1402,20 +1402,24 @@ def api_export_hq_dataset(seed: int = 42, val_fraction: float = 0.2):
     """ZIP-Export aller als HQ getaggten Frames (YOLO-Format, Train/Val-Split)."""
     pairs: list[tuple[Path, Path]] = []
 
-    # Labeler-Tasks
+    # Labeler-Tasks (Struktur: DATA_DIR / date / task_id)
     if DATA_DIR.is_dir():
-        for td in DATA_DIR.iterdir():
-            if not td.is_dir() or td.name.startswith("_"):
+        for day_dir in sorted(DATA_DIR.iterdir()):
+            if not day_dir.is_dir() or day_dir.name.startswith("_"):
                 continue
-            tags = _load_tags(_labeler_tags_path(td.name))
-            hq = {k for k, v in tags.items() if "hq" in v}
-            frames_dir = td / "frames"
-            labels_dir = td / "labels"
-            for fname in hq:
-                img = frames_dir / fname
-                lab = labels_dir / (Path(fname).stem + ".txt")
-                if img.exists() and lab.exists():
-                    pairs.append((img, lab))
+            for td in sorted(day_dir.iterdir()):
+                if not td.is_dir():
+                    continue
+                task_id = f"{day_dir.name}/{td.name}"
+                tags = _load_tags(_labeler_tags_path(task_id))
+                hq = {k for k, v in tags.items() if "hq" in v}
+                frames_dir = td / "frames"
+                labels_dir = td / "labels"
+                for fname in hq:
+                    img = frames_dir / fname
+                    lab = labels_dir / (Path(fname).stem + ".txt")
+                    if img.exists() and lab.exists():
+                        pairs.append((img, lab))
 
     # Import-Datensatz
     if IMPORT_YOLO_BALL_DIR and IMPORT_YOLO_BALL_DIR.is_dir():
