@@ -2431,6 +2431,287 @@ def api_eval_frame(source: str = Query(...), task: str = Query(...), filename: s
     return FileResponse(str(img_path))
 
 
+# =====================================================================
+# Man-in-the-Middle: Auto-Label + Review
+# =====================================================================
+
+MIM_DIR = DATA_DIR / "man-in-middle"
+MIM_DIR.mkdir(parents=True, exist_ok=True)
+MIM_WEIGHTS_PATH = MIM_DIR / "weights.pt"
+MIM_JOB_PATH     = MIM_DIR / "job.json"
+
+_mim_job: dict = {}
+
+
+def _mim_load_job() -> dict:
+    global _mim_job
+    if _mim_job:
+        return _mim_job
+    if MIM_JOB_PATH.exists():
+        try:
+            _mim_job = json.loads(MIM_JOB_PATH.read_text(encoding="utf-8"))
+            return _mim_job
+        except Exception:
+            pass
+    return {"status": "idle", "progress": 0, "total": 0, "frames": [], "error": None}
+
+
+def _mim_save_job(job: dict) -> None:
+    global _mim_job
+    _mim_job = job
+    try:
+        MIM_JOB_PATH.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _collect_non_hq_labeled_frames(n: int) -> list[dict]:
+    """Bis zu n gelabelte Frames ohne hq/hq2-Tag, zufällig gemischt."""
+    candidates: list[dict] = []
+    if not DATA_DIR.is_dir():
+        return candidates
+    for day_dir in sorted(DATA_DIR.iterdir()):
+        if not day_dir.is_dir() or day_dir.name.startswith("_"):
+            continue
+        for td in sorted(day_dir.iterdir()):
+            if not td.is_dir():
+                continue
+            task_id = f"{day_dir.name}/{td.name}"
+            tags = _load_tags(_labeler_tags_path(task_id))
+            frames_dir = td / "frames"
+            labels_dir = td / "labels"
+            if not frames_dir.is_dir() or not labels_dir.is_dir():
+                continue
+            for img in sorted(frames_dir.glob("*.jpg")):
+                fname = img.name
+                frame_tags = tags.get(fname, [])
+                if "hq" in frame_tags or "hq2" in frame_tags:
+                    continue
+                if not (labels_dir / (img.stem + ".txt")).exists():
+                    continue
+                candidates.append({
+                    "task_id": task_id,
+                    "filename": fname,
+                    "prediction": None,
+                    "reviewed": False,
+                    "approved": False,
+                })
+    random.shuffle(candidates)
+    return candidates[:n]
+
+
+def _run_mim_job_thread(n_frames: int, conf: float) -> None:
+    global _mim_job
+    try:
+        from ultralytics import YOLO  # type: ignore
+        model = YOLO(str(MIM_WEIGHTS_PATH))
+    except Exception as e:
+        _mim_job["status"] = "error"
+        _mim_job["error"] = f"Modell-Ladefehler: {e}"
+        _mim_save_job(_mim_job)
+        return
+
+    frames = _collect_non_hq_labeled_frames(n_frames)
+    if not frames:
+        _mim_job["status"] = "error"
+        _mim_job["error"] = "Keine geeigneten Frames gefunden (alle bereits HQ/HQ2 oder kein Label)."
+        _mim_save_job(_mim_job)
+        return
+
+    _mim_job["total"] = len(frames)
+    _mim_job["frames"] = frames
+    _mim_save_job(_mim_job)
+
+    for i, frame in enumerate(frames):
+        try:
+            img_path = DATA_DIR / frame["task_id"] / "frames" / frame["filename"]
+            results = model.predict(str(img_path), conf=conf, verbose=False)
+            boxes = results[0].boxes
+            if boxes is not None and len(boxes) > 0:
+                best = int(boxes.conf.argmax())
+                xywhn = boxes.xywhn[best].tolist()
+                frame["prediction"] = {
+                    "x": round(xywhn[0], 6),
+                    "y": round(xywhn[1], 6),
+                    "w": round(xywhn[2], 6),
+                    "h": round(xywhn[3], 6),
+                    "conf": round(float(boxes.conf[best]), 4),
+                }
+            else:
+                frame["prediction"] = None
+        except Exception as exc:
+            print(f"MIM inference error: {exc}")
+            frame["prediction"] = None
+
+        _mim_job["progress"] = i + 1
+        if (i + 1) % 100 == 0:
+            _mim_save_job(_mim_job)
+
+    _mim_job["status"] = "done"
+    _mim_job["finished_at"] = dt.datetime.utcnow().isoformat() + "Z"
+    _mim_save_job(_mim_job)
+
+
+@core.get("/man-in-middle", include_in_schema=False)
+def mim_html():
+    return FileResponse(str(STATIC_DIR / "man-in-middle.html"))
+
+
+@core.post("/api/man-in-middle/weights")
+async def mim_upload_weights(file: UploadFile = File(...)):
+    if not file.filename.endswith(".pt"):
+        raise HTTPException(400, "Nur .pt-Dateien erlaubt.")
+    content = await file.read()
+    MIM_WEIGHTS_PATH.write_bytes(content)
+    return {"ok": True, "filename": file.filename, "size_mb": round(len(content) / 1e6, 1)}
+
+
+@core.get("/api/man-in-middle/status")
+def mim_status():
+    job = _mim_load_job()
+    weights_size_mb = round(MIM_WEIGHTS_PATH.stat().st_size / 1e6, 1) if MIM_WEIGHTS_PATH.exists() else 0
+    return {
+        "weights": MIM_WEIGHTS_PATH.exists(),
+        "weights_size_mb": weights_size_mb,
+        "job_status": job.get("status", "idle"),
+        "progress": job.get("progress", 0),
+        "total": job.get("total", 0),
+        "conf": job.get("conf", 0.3),
+        "error": job.get("error"),
+        "finished_at": job.get("finished_at"),
+        "stats": {
+            "pending":  sum(1 for f in job.get("frames", []) if not f["reviewed"]),
+            "approved": sum(1 for f in job.get("frames", []) if f.get("approved")),
+            "skipped":  sum(1 for f in job.get("frames", []) if f["reviewed"] and not f.get("approved")),
+            "total":    len(job.get("frames", [])),
+        },
+    }
+
+
+class MimRunIn(BaseModel):
+    n_frames: int = 5000
+    conf: float = 0.3
+
+
+@core.post("/api/man-in-middle/run")
+def mim_run(body: MimRunIn):
+    global _mim_job
+    if _mim_load_job().get("status") == "running":
+        raise HTTPException(409, "Ein Job läuft bereits.")
+    if not MIM_WEIGHTS_PATH.exists():
+        raise HTTPException(400, "Keine Gewichte hochgeladen.")
+    _mim_job = {
+        "status": "running",
+        "progress": 0,
+        "total": 0,
+        "conf": body.conf,
+        "n_frames": body.n_frames,
+        "frames": [],
+        "error": None,
+        "started_at": dt.datetime.utcnow().isoformat() + "Z",
+        "finished_at": None,
+    }
+    _mim_save_job(_mim_job)
+    threading.Thread(target=_run_mim_job_thread, args=(body.n_frames, body.conf), daemon=True).start()
+    return {"ok": True}
+
+
+@core.get("/api/man-in-middle/review")
+def mim_review(
+    filter: str = Query("pending"),
+    offset: int = Query(0),
+    limit: int = Query(20),
+):
+    job = _mim_load_job()
+    all_frames = job.get("frames", [])
+    if filter == "pending":
+        filtered = [f for f in all_frames if not f["reviewed"]]
+    elif filter == "approved":
+        filtered = [f for f in all_frames if f.get("approved")]
+    elif filter == "skipped":
+        filtered = [f for f in all_frames if f["reviewed"] and not f.get("approved")]
+    else:
+        filtered = all_frames
+    return {
+        "total": len(filtered),
+        "offset": offset,
+        "frames": filtered[offset: offset + limit],
+        "stats": {
+            "pending":  sum(1 for f in all_frames if not f["reviewed"]),
+            "approved": sum(1 for f in all_frames if f.get("approved")),
+            "skipped":  sum(1 for f in all_frames if f["reviewed"] and not f.get("approved")),
+            "total":    len(all_frames),
+        },
+    }
+
+
+class MimActionIn(BaseModel):
+    task_id: str
+    filename: str
+
+
+@core.post("/api/man-in-middle/approve")
+def mim_approve(body: MimActionIn):
+    """Schreibt Modell-Prediction als neues Label und taggt Frame mit hq2."""
+    job = _mim_load_job()
+    frame = next(
+        (f for f in job.get("frames", []) if f["task_id"] == body.task_id and f["filename"] == body.filename),
+        None,
+    )
+    if frame is None:
+        raise HTTPException(404, "Frame nicht im Job gefunden.")
+
+    # Label schreiben (Modell-Prediction oder leer = kein Ball bestätigt)
+    lab_path = DATA_DIR / body.task_id / "labels" / (Path(body.filename).stem + ".txt")
+    lab_path.parent.mkdir(parents=True, exist_ok=True)
+    pred = frame.get("prediction")
+    if pred:
+        lab_path.write_text(
+            f"0 {pred['x']:.6f} {pred['y']:.6f} {pred['w']:.6f} {pred['h']:.6f}\n",
+            encoding="utf-8",
+        )
+    else:
+        lab_path.write_text("", encoding="utf-8")
+
+    # hq2-Tag setzen
+    tags_path = _labeler_tags_path(body.task_id)
+    tags = _load_tags(tags_path)
+    tags.setdefault(body.filename, [])
+    if "hq2" not in tags[body.filename]:
+        tags[body.filename].append("hq2")
+    _save_tags(tags_path, tags)
+
+    frame["reviewed"] = True
+    frame["approved"] = True
+    _mim_save_job(job)
+    return {"ok": True}
+
+
+@core.post("/api/man-in-middle/skip")
+def mim_skip(body: MimActionIn):
+    """Markiert Frame als übersprungen – kein Label-Update, kein Tag."""
+    job = _mim_load_job()
+    frame = next(
+        (f for f in job.get("frames", []) if f["task_id"] == body.task_id and f["filename"] == body.filename),
+        None,
+    )
+    if frame is None:
+        raise HTTPException(404, "Frame nicht im Job gefunden.")
+    frame["reviewed"] = True
+    frame["approved"] = False
+    _mim_save_job(job)
+    return {"ok": True}
+
+
+@core.post("/api/man-in-middle/reset")
+def mim_reset():
+    """Setzt Job-Zustand zurück."""
+    global _mim_job
+    _mim_job = {"status": "idle", "progress": 0, "total": 0, "frames": [], "error": None}
+    _mim_save_job(_mim_job)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------
 # Wrapper-App, um Subpfad korrekt zu bedienen
 # ---------------------------------------------------------------------

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpinEvo | Man-in-the-Middle</title>
+  <script defer src="static/man-in-middle.js?v=1"></script>
+  <style>
+    :root {
+      --bg: #0f172a; --card: #111827; --border: #1f2937; --muted: #94a3b8;
+      --accent: #22d3ee; --green: #22c55e; --yellow: #f59e0b; --red: #ef4444;
+      --blue: #3b82f6; --purple: #a855f7;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system; background: var(--bg); color: #e5e7eb; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    h1 { margin: 0 0 4px; font-size: 20px; font-weight: 700; }
+    h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: #cbd5e1; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .btn { background: #1f2937; border: 1px solid #374151; padding: 7px 14px; border-radius: 9px; color: #e5e7eb; cursor: pointer; font-size: 13px; white-space: nowrap; }
+    .btn:hover:not(:disabled) { background: #374151; }
+    .btn:disabled { opacity: 0.35; cursor: default; }
+    .btn-primary { background: #1e3a5f; border-color: #2563eb; color: #bfdbfe; }
+    .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+    .btn-green  { background: #052e16; border-color: #166534; color: #86efac; }
+    .btn-green:hover:not(:disabled) { background: #14532d; }
+    .btn-danger { background: #450a0a; border-color: #7f1d1d; color: #fca5a5; }
+    .btn-danger:hover:not(:disabled) { background: #7f1d1d; }
+    .btn-hq2 { background: #1a0533; border-color: #6b21a8; color: #d8b4fe; }
+    .btn-hq2:hover:not(:disabled) { background: #581c87; }
+
+    input[type=number], input[type=range] { background: #0b1220; border: 1px solid #374151; border-radius: 6px; color: #e5e7eb; padding: 6px 8px; font-size: 13px; }
+    input[type=range] { padding: 0; accent-color: var(--accent); }
+    label { font-size: 13px; color: #94a3b8; }
+
+    progress { width: 100%; height: 8px; border-radius: 4px; appearance: none; }
+    progress::-webkit-progress-bar   { background: #1f2937; border-radius: 4px; }
+    progress::-webkit-progress-value { background: var(--accent); border-radius: 4px; }
+
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .tab { padding: 5px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: #e5e7eb; cursor: pointer; font-size: 13px; }
+    .tab:hover { background: #1f2937; }
+    .tab.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+
+    .metric-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .metric { background: #1f2937; border-radius: 8px; padding: 8px 14px; min-width: 90px; }
+    .metric-val { font-size: 22px; font-weight: 700; line-height: 1.1; }
+    .metric-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* Frame-Grid */
+    .frame-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+    .frame-card { background: #1f2937; border: 2px solid #374151; border-radius: 10px; overflow: hidden; cursor: default; }
+    .frame-card.focused { border-color: var(--accent); }
+    .frame-canvas-wrap { position: relative; background: #000; }
+    canvas.frame-canvas { display: block; width: 100%; height: auto; }
+    .no-ball-badge { position: absolute; top: 6px; left: 6px; background: rgba(239,68,68,0.85); color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+    .conf-badge { position: absolute; top: 6px; left: 6px; background: rgba(34,211,238,0.85); color: #000; font-size: 11px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+    .approved-badge { position: absolute; top: 6px; right: 6px; background: rgba(34,197,94,0.85); color: #000; font-size: 11px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+    .skipped-badge  { position: absolute; top: 6px; right: 6px; background: rgba(100,116,139,0.85); color: #fff; font-size: 11px; padding: 2px 7px; border-radius: 5px; font-weight: 600; }
+    .frame-info { padding: 8px 10px 4px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .frame-actions { display: flex; gap: 6px; padding: 6px 8px 8px; }
+    .frame-actions .btn { flex: 1; text-align: center; padding: 6px 4px; font-size: 12px; }
+
+    .pagination { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+    #statusMsg { margin-top: 8px; font-size: 13px; color: var(--muted); min-height: 18px; }
+    #progressWrap { display: none; margin-top: 10px; }
+
+    .badge-hq2 { display: inline-block; background: #581c87; color: #d8b4fe; border-radius: 5px; font-size: 11px; padding: 1px 6px; margin-left: 4px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div style="margin-bottom:14px;">
+    <div class="row" style="margin-bottom:4px;">
+      <h1>Man-in-the-Middle</h1>
+      <span class="badge-hq2">HQ2</span>
+    </div>
+    <div class="muted">Modell-Prediction auf nicht-HQ-gelabelte Frames &rarr; Review &rarr; als HQ2 freigeben &bull; <a id="linkBack" href="#">&larr; Labeler</a></div>
+  </div>
+
+  <!-- Gewichte -->
+  <div class="card" id="cardWeights">
+    <h2>1. Modell-Gewichte</h2>
+    <div class="row">
+      <input type="file" id="weightsFile" accept=".pt" style="font-size:13px; color:#e5e7eb;">
+      <button class="btn btn-primary" id="btnUploadWeights">Hochladen</button>
+      <span id="weightsStatus" class="muted">–</span>
+    </div>
+  </div>
+
+  <!-- Run-Konfiguration -->
+  <div class="card" id="cardRun">
+    <h2>2. Inference starten</h2>
+    <div class="row" style="margin-bottom:10px;">
+      <label>Frames (max): <input type="number" id="nFrames" value="5000" min="100" max="50000" step="100" style="width:90px;"></label>
+      <label style="display:flex; align-items:center; gap:8px;">
+        Confidence:
+        <input type="range" id="confSlider" min="0.1" max="0.9" step="0.05" value="0.3" style="width:120px;">
+        <span id="confVal">0.30</span>
+      </label>
+    </div>
+    <div class="row">
+      <button class="btn btn-primary" id="btnRun">Inference starten</button>
+      <button class="btn btn-danger" id="btnReset" style="display:none;">Job zurücksetzen</button>
+    </div>
+    <div id="progressWrap">
+      <progress id="progressBar" value="0" max="100"></progress>
+      <div class="muted" id="progressText" style="margin-top:4px;">0 / 0</div>
+    </div>
+    <div id="statusMsg"></div>
+  </div>
+
+  <!-- Review -->
+  <div class="card" id="cardReview" style="display:none;">
+    <h2>3. Review <span class="muted" style="font-weight:400; font-size:13px;">(H = Freigeben &nbsp;|&nbsp; S = Überspringen &nbsp;|&nbsp; &larr;&rarr; navigieren)</span></h2>
+
+    <div class="metric-row" id="statsRow"></div>
+
+    <div class="tabs" id="filterTabs">
+      <button class="tab active" data-filter="pending">Ausstehend</button>
+      <button class="tab" data-filter="approved">Freigegeben</button>
+      <button class="tab" data-filter="skipped">Übersprungen</button>
+      <button class="tab" data-filter="all">Alle</button>
+    </div>
+
+    <div class="frame-grid" id="frameGrid"></div>
+
+    <div class="pagination" id="paginationRow">
+      <button class="btn" id="btnPrev">&#8592; Zurück</button>
+      <span class="muted" id="pageInfo"></span>
+      <button class="btn" id="btnNext">Weiter &#8594;</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
