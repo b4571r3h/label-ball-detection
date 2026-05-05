@@ -17,10 +17,15 @@
   
   const ROOT = detectRoot(); 
   console.log("Detected ROOT:", ROOT, "from pathname:", window.location.pathname);
+
+  function withRoot(path) {
+    const cleanPath = path.startsWith("/") ? path : `/${path}`;
+    const cleanRoot = ROOT ? (ROOT.startsWith("/") ? ROOT : `/${ROOT}`) : "";
+    return `${cleanRoot}${cleanPath}`;
+  }
   
   const API = (path) => {
-    const cleanPath = path.startsWith("/") ? path : "/" + path;
-    const fullUrl = `${ROOT}${cleanPath}`;
+    const fullUrl = withRoot(path);
     console.log("API URL:", fullUrl);
     return fullUrl;
   };
@@ -28,11 +33,11 @@
   // Richtige Ziel-URL für die Label-Review-Seite setzen (damit keine doppelte /ball-detection entsteht).
   const linkLabelReview = document.getElementById("linkLabelReview");
   if (linkLabelReview) {
-    linkLabelReview.href = `${ROOT}/label-review/`;
+    linkLabelReview.href = withRoot("/label-review/");
   }
   const linkRallyLabel = document.getElementById("linkRallyLabel");
   if (linkRallyLabel) {
-    linkRallyLabel.href = `${ROOT}/rally-label/`;
+    linkRallyLabel.href = withRoot("/rally-label/");
   }
 
   async function errorTextFromResponse(response) {
