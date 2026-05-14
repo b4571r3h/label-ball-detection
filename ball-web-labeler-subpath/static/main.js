@@ -33,11 +33,11 @@
   // Richtige Ziel-URL für die Label-Review-Seite setzen (damit keine doppelte /ball-detection entsteht).
   const linkLabelReview = document.getElementById("linkLabelReview");
   if (linkLabelReview) {
-    linkLabelReview.href = withRoot("/label-review/");
+    linkLabelReview.href = withRoot("/label-review");
   }
   const linkRallyLabel = document.getElementById("linkRallyLabel");
   if (linkRallyLabel) {
-    linkRallyLabel.href = withRoot("/rally-label/");
+    linkRallyLabel.href = withRoot("/rally-label");
   }
 
   async function errorTextFromResponse(response) {
