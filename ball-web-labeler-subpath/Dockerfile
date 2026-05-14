@@ -10,4 +10,4 @@ RUN echo "$GIT_SHA" >/tmp/.labeler_git_sha
 COPY . /app
 RUN mkdir -p ${LABEL_DATA_DIR}
 EXPOSE 8000
-CMD ["sh","-c","pip install -q --upgrade yt-dlp && uvicorn app:app --host 0.0.0.0 --port 8000 --root-path \"$APP_ROOT_PATH\""]
+CMD ["sh","-c","pip install -q --upgrade yt-dlp && uvicorn app:app --host 0.0.0.0 --port 8000"]
