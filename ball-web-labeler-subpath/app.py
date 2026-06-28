@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Query, Depends
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1758,6 +1758,124 @@ def _rally_paths(task_id: str) -> tuple[Path, Path]:
     return td / "rally_labels.json", td / "rally_timeseries.csv"
 
 
+def _rally_video_path(td: Path) -> Path | None:
+    """Findet eine video.<ext> Datei im Task-Ordner (bestehende Konvention, siehe task_dir())."""
+    for vid in sorted(td.glob("video.*")):
+        if vid.suffix.lower() in ALLOWED_VIDEO_EXT:
+            return vid
+    return None
+
+
+def _rally_task_mode(td: Path) -> str:
+    """'video' wenn eine video.<ext> Datei vorliegt, sonst 'frames' (bestehender Modus)."""
+    return "video" if _rally_video_path(td) is not None else "frames"
+
+
+# Codecs, die im Browser (insb. Firefox ohne HW-HEVC) oft nicht abspielbar sind.
+RALLY_TRANSCODE_CODECS = {"hevc", "h265", "mpeg2video"}
+
+
+def _ffprobe_video_codec(path: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        codec = result.stdout.strip().lower()
+        return codec or None
+    except Exception:
+        return None
+
+
+def _ffprobe_fps(path: Path) -> float:
+    """Liefert die nominale Framerate (r_frame_rate, z. B. '30000/1001' -> 29.97)."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", str(path),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        raw = result.stdout.strip()
+        if "/" in raw:
+            num, den = raw.split("/", 1)
+            return round(float(num) / float(den), 3) if float(den) != 0 else 0.0
+        return round(float(raw), 3) if raw else 0.0
+    except Exception:
+        return 0.0
+
+
+def _ffprobe_has_audio(path: Path) -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _resolve_playable_video_path(source_path: Path, cache_dir: Path) -> Path:
+    """
+    Transcodiert HEVC/H.265/MPEG2 nach H.264 (Browser-Kompatibilität, Port von
+    spinevo rally-label-transcode.ts), gecacht per mtime+size-Fingerprint unter cache_dir.
+    Gibt source_path unverändert zurück, wenn kein Transcode nötig ist.
+    """
+    codec = _ffprobe_video_codec(source_path)
+    if codec not in RALLY_TRANSCODE_CODECS:
+        return source_path
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    stat = source_path.stat()
+    fingerprint = hashlib.sha1(
+        f"{source_path}:{stat.st_mtime_ns}:{stat.st_size}".encode()
+    ).hexdigest()[:16]
+    cached = cache_dir / f"{source_path.stem}_{fingerprint}_h264.mp4"
+    if cached.exists():
+        return cached
+    has_audio = _ffprobe_has_audio(source_path)
+    cmd = ["ffmpeg", "-y", "-i", str(source_path), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20"]
+    cmd += (["-c:a", "aac"] if has_audio else ["-an"])
+    cmd += [str(cached)]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(500, "ffmpeg: Transcode-Timeout nach 900 s")
+    if result.returncode != 0 or not cached.exists():
+        print(f"ffmpeg transcode stderr (last 1000 chars): {result.stderr[-1000:]}")
+        raise HTTPException(500, f"ffmpeg-Transcode fehlgeschlagen (exit {result.returncode})")
+    return cached
+
+
+def _build_points_csv_text(
+    rows: list[dict],
+    extra_columns: list[str] | None = None,
+) -> str:
+    """
+    Baut eine Punkte-CSV im spinevo-Schema: frame,x,y,confidence[,...extra].
+    `rows` ist eine Liste von dicts mit mind. den Keys frame,x,y,confidence;
+    fehlende Werte werden als leere Zelle geschrieben (sparse, wie in
+    rallyTypes.ts parseBallPointsCsv erwartet).
+    """
+    columns = ["frame", "x", "y", "confidence"] + (extra_columns or [])
+    out = io.StringIO()
+    out.write(",".join(columns) + "\n")
+    for row in rows:
+        cells = []
+        for col in columns:
+            v = row.get(col)
+            cells.append("" if v is None else str(v))
+        out.write(",".join(cells) + "\n")
+    return out.getvalue()
+
+
 def _build_rally_timeseries_csv(
     frames: list[str],
     points_map: dict[str, tuple[float, float] | None],
@@ -1790,11 +1908,32 @@ def _build_rally_timeseries_csv(
 @core.get("/api/rally/tasks")
 def api_rally_tasks():
     """
-    Listet Tasks für Rally-Labeling.
-    Ein Task ist nutzbar, wenn Frames vorhanden sind.
+    Listet Tasks für Rally-Labeling: frames-Modus (vorab extrahierte JPEGs,
+    Punkte aus YOLO-Labels) und video-Modus (video.<ext> + points.csv im
+    Task-Ordner, Punkte direkt aus der CSV inkl. optionaler Pose-Spalten).
     """
     items = []
     for tid, td in _iter_task_dirs():
+        mode = _rally_task_mode(td)
+        rally_json, _ = _rally_paths(tid)
+
+        if mode == "video":
+            points_csv = td / "points.csv"
+            frames_total = 0
+            if points_csv.exists():
+                with points_csv.open("r", encoding="utf-8") as f:
+                    frames_total = max(0, sum(1 for _ in f) - 1)
+            items.append(
+                {
+                    "task_id": tid,
+                    "mode": "video",
+                    "frames_total": frames_total,
+                    "frames_with_label_file": None,
+                    "has_rally_labels": rally_json.exists(),
+                }
+            )
+            continue
+
         frames_dir = td / "frames"
         labels_dir = td / "labels"
         frames = sorted(frames_dir.glob("*.jpg")) if frames_dir.is_dir() else []
@@ -1805,10 +1944,10 @@ def api_rally_tasks():
             lab = labels_dir / f"{img.stem}.txt"
             if lab.exists():
                 labeled += 1
-        rally_json, _ = _rally_paths(tid)
         items.append(
             {
                 "task_id": tid,
+                "mode": "frames",
                 "frames_total": len(frames),
                 "frames_with_label_file": labeled,
                 "has_rally_labels": rally_json.exists(),
@@ -1852,6 +1991,50 @@ def api_rally_task_points(task_id: str):
     return {"task_id": task_id, "rows": rows}
 
 
+@core.get("/api/rally/task/{task_id:path}/points.csv", response_class=PlainTextResponse)
+def api_rally_task_points_csv(task_id: str):
+    """
+    Liefert die Ballpunkte als CSV-Text im spinevo-Schema (frame,x,y,confidence
+    [,p1_*,p2_*,p1_lm*,p2_lm*]). Im frames-Modus wird das live aus den
+    YOLO-Labels synthetisiert (keine Pose/Box-Daten dort). Im video-Modus wird
+    die hinterlegte points.csv direkt durchgereicht (fester Pfad im Task-Ordner,
+    kein alternativer Datensatz).
+    """
+    td = task_dir(task_id)
+    mode = _rally_task_mode(td)
+
+    if mode == "video":
+        csv_path = td / "points.csv"
+        if not csv_path.exists():
+            raise HTTPException(404, "Nicht gefunden: points.csv im Task-Ordner.")
+        return csv_path.read_text(encoding="utf-8")
+
+    frames = sorted((td / "frames").glob("*.jpg"))
+    if not frames:
+        raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
+    labels_dir = td / "labels"
+    rows = []
+    for idx, img_path in enumerate(frames):
+        try:
+            with Image.open(img_path) as im:
+                w, h = im.size
+        except Exception:
+            w, h = 0, 0
+        point = None
+        lab = labels_dir / f"{img_path.stem}.txt"
+        if lab.exists() and w > 0 and h > 0:
+            point = _read_yolo_ball_center_px(lab, w, h)
+        rows.append(
+            {
+                "frame": idx,
+                "x": None if point is None else round(point[0], 3),
+                "y": None if point is None else round(point[1], 3),
+                "confidence": None if point is None else 1.0,
+            }
+        )
+    return _build_points_csv_text(rows)
+
+
 @core.get("/api/rally/task/{task_id:path}/labels")
 def api_rally_task_get_labels(task_id: str):
     rally_json, _ = _rally_paths(task_id)
@@ -1884,17 +2067,69 @@ def api_rally_task_get_labels(task_id: str):
     }
 
 
+def _build_rally_timeseries_csv_from_points_csv(points_csv: Path, event_map: dict[int, list[str]]) -> str:
+    """
+    Wie _build_rally_timeseries_csv, aber für den video-Modus: reicht die
+    hinterlegte Punkte-CSV (inkl. optionaler p1/p2-Box- und Pose-Spalten) 1:1
+    durch und hängt nur die `label`-Spalte an (0..3, wie im frames-Modus).
+    """
+    text = points_csv.read_text(encoding="utf-8")
+    lines = [l for l in text.split("\n") if l != ""]
+    if not lines:
+        return "frame,x,y,confidence,label\n"
+    out = io.StringIO()
+    out.write(lines[0] + ",label\n")
+    for i, line in enumerate(lines[1:]):
+        kinds = set(event_map.get(i, []))
+        if "start" in kinds and "end" in kinds:
+            label = 3
+        elif "start" in kinds:
+            label = 1
+        elif "end" in kinds:
+            label = 2
+        else:
+            label = 0
+        out.write(f"{line},{label}\n")
+    return out.getvalue()
+
+
 @core.post("/api/rally/task/{task_id:path}/labels")
 def api_rally_task_save_labels(task_id: str, body: RallySaveIn):
     td = task_dir(task_id)
-    frames = sorted((td / "frames").glob("*.jpg"))
-    if not frames:
-        raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
+    mode = _rally_task_mode(td)
+
+    if mode == "video":
+        points_csv = td / "points.csv"
+        num_frames = 0
+        header_line = ""
+        if points_csv.exists():
+            with points_csv.open("r", encoding="utf-8") as f:
+                lines = f.readlines()
+            header_line = lines[0].strip() if lines else ""
+            num_frames = max(0, len(lines) - 1)
+        if num_frames == 0:
+            raise HTTPException(404, "Keine points.csv in diesem Task gefunden.")
+        frames: list[Path] = []
+        feature_names = [c for c in header_line.split(",") if c and c != "frame"]
+        video_source = _rally_video_path(td)
+        video_path = video_source.name if video_source else None
+        points_csv_rel = "points.csv"
+        fps = _ffprobe_fps(video_source) if video_source else 0.0
+    else:
+        frames = sorted((td / "frames").glob("*.jpg"))
+        if not frames:
+            raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
+        num_frames = len(frames)
+        feature_names = ["x", "y"]
+        video_path = None
+        points_csv_rel = None
+        fps = 0.0
+
     events = []
     for e in body.events:
         if e.kind not in ("start", "end"):
             continue
-        if e.frame < 0 or e.frame >= len(frames):
+        if e.frame < 0 or e.frame >= num_frames:
             continue
         events.append({"frame": int(e.frame), "kind": e.kind})
     # dedupe/sort
@@ -1906,9 +2141,14 @@ def api_rally_task_save_labels(task_id: str, body: RallySaveIn):
     rally_json_path, rally_csv_path = _rally_paths(task_id)
     payload = {
         "task_id": task_id,
+        "mode": mode,
+        "video_path": video_path,
+        "points_csv": points_csv_rel,
         "created_at": dt.datetime.utcnow().isoformat() + "Z",
-        "num_frames": len(frames),
+        "num_frames": num_frames,
+        "fps": fps,
         "sync_offset_frames": int(body.sync_offset_frames),
+        "feature_names": feature_names,
         "label_map": {
             "0": "kein_event",
             "1": "ballwechsel_start",
@@ -1919,34 +2159,57 @@ def api_rally_task_save_labels(task_id: str, body: RallySaveIn):
     }
     rally_json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    points_map: dict[str, tuple[float, float] | None] = {}
-    labels_dir = td / "labels"
-    for img_path in frames:
-        fname = img_path.name
-        lab = labels_dir / f"{img_path.stem}.txt"
-        if not lab.exists():
-            points_map[fname] = None
-            continue
-        try:
-            with Image.open(img_path) as im:
-                w, h = im.size
-        except Exception:
-            points_map[fname] = None
-            continue
-        points_map[fname] = _read_yolo_ball_center_px(lab, w, h)
     event_map: dict[int, list[str]] = defaultdict(list)
     for e in events:
         event_map[e["frame"]].append(e["kind"])
-    rally_csv = _build_rally_timeseries_csv([f.name for f in frames], points_map, event_map)
+
+    if mode == "video":
+        rally_csv = _build_rally_timeseries_csv_from_points_csv(td / "points.csv", event_map)
+    else:
+        points_map: dict[str, tuple[float, float] | None] = {}
+        labels_dir = td / "labels"
+        for img_path in frames:
+            fname = img_path.name
+            lab = labels_dir / f"{img_path.stem}.txt"
+            if not lab.exists():
+                points_map[fname] = None
+                continue
+            try:
+                with Image.open(img_path) as im:
+                    w, h = im.size
+            except Exception:
+                points_map[fname] = None
+                continue
+            points_map[fname] = _read_yolo_ball_center_px(lab, w, h)
+        rally_csv = _build_rally_timeseries_csv([f.name for f in frames], points_map, event_map)
     rally_csv_path.write_text(rally_csv, encoding="utf-8")
 
     return {
         "ok": True,
         "task_id": task_id,
+        "mode": mode,
         "json_file": str(rally_json_path.relative_to(td)),
         "csv_file": str(rally_csv_path.relative_to(td)),
         "events_saved": len(events),
     }
+
+
+@core.get("/api/rally/task/{task_id:path}/video")
+def api_rally_task_video(task_id: str):
+    """
+    Streamt die video.<ext> eines video-Modus-Tasks (Range-Requests werden von
+    Starlettes FileResponse automatisch unterstützt). Transcodiert HEVC/H.265
+    bei Bedarf nach H.264 (Cache unter <task>/.h264-cache/), Port von spinevo
+    rally-label-transcode.ts.
+    """
+    td = task_dir(task_id)
+    source = _rally_video_path(td)
+    if source is None:
+        raise HTTPException(404, "Kein video.<ext> in diesem Task gefunden.")
+    cache_dir = td / ".h264-cache"
+    playable = _resolve_playable_video_path(source, cache_dir)
+    media_type = "video/mp4" if playable.suffix.lower() == ".mp4" else None
+    return FileResponse(str(playable), media_type=media_type, content_disposition_type="inline")
 
 
 # -------------------- Label speichern (YOLO-Format) --------------------

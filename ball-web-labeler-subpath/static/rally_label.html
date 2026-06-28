@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Rally Labeling</title>
-  <script defer src="static/rally_label.js?v=1"></script>
+  <script defer src="static/rally_label.js?v=2"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --line:#1f2937; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -13,10 +13,11 @@
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     .btn { background:#1f2937; color:#e5e7eb; border:1px solid #374151; border-radius:10px; padding:8px 12px; cursor:pointer; }
     .btn:hover { background:#374151; }
+    .btn.active { border-color: var(--accent); color: var(--accent); }
     .muted { color:var(--muted); font-size:13px; }
     .big { font-size:19px; font-weight:700; margin:0 0 8px 0; }
-    #frameImg { max-width:100%; max-height:72vh; display:block; border-radius:10px; }
-    #imgWrap { position:relative; display:inline-block; line-height:0; }
+    #frameImg, #frameVideo { max-width:100%; max-height:72vh; display:block; border-radius:10px; }
+    #mediaWrap { position:relative; display:inline-block; line-height:0; }
     #overlay { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
     #timeline { height:20px; background:#1f2937; border-radius:8px; position:relative; }
     .marker { position:absolute; top:0; bottom:0; width:2px; transform:translateX(-50%); }
@@ -28,7 +29,10 @@
 <body>
   <div class="wrap">
     <h1 class="big">SpinEvo | Rally Labeling</h1>
-    <p class="muted">Frames laden, mit <strong>S</strong> Rally-Start und <strong>E</strong> Rally-Ende markieren, dann speichern.</p>
+    <p class="muted">
+      Frames/Video laden, mit <strong>S</strong> Rally-Start und <strong>E</strong> Rally-Ende markieren,
+      <strong>U</strong> = Undo, dann speichern.
+    </p>
 
     <div class="card row">
       <a href="./" class="btn" style="text-decoration:none;">← Ball-Labeler</a>
@@ -46,15 +50,18 @@
         <div class="row">
           <button id="prevBtn" class="btn">◀</button>
           <button id="nextBtn" class="btn">▶</button>
+          <button id="playBtn" class="btn">▶ Play (P)</button>
           <button id="startBtn" class="btn">Start (S)</button>
           <button id="endBtn" class="btn">Ende (E)</button>
           <button id="deleteBtn" class="btn">Frame-Events löschen (D)</button>
+          <button id="undoBtn" class="btn">Undo (U)</button>
         </div>
       </div>
       <input id="scrub" type="range" min="0" max="0" value="0" style="width:100%; margin:10px 0;" />
       <div id="timeline"></div>
-      <div id="imgWrap" style="margin-top:12px;">
+      <div id="mediaWrap" style="margin-top:12px;">
         <img id="frameImg" src="" alt="frame" />
+        <video id="frameVideo" style="display:none;" playsinline></video>
         <canvas id="overlay"></canvas>
       </div>
     </div>
