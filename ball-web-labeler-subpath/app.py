@@ -60,7 +60,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Query, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Query, Depends, Request
 from fastapi.responses import FileResponse, RedirectResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -1914,6 +1914,8 @@ def api_rally_tasks():
     """
     items = []
     for tid, td in _iter_task_dirs():
+        if tid.startswith("imported/"):
+            continue  # per /api/import/yolo-ball hochgeladene Bootstrap-Frames sind keine Rally-Tasks
         mode = _rally_task_mode(td)
         rally_json, _ = _rally_paths(tid)
 
@@ -2210,6 +2212,117 @@ def api_rally_task_video(task_id: str):
     playable = _resolve_playable_video_path(source, cache_dir)
     media_type = "video/mp4" if playable.suffix.lower() == ".mp4" else None
     return FileResponse(str(playable), media_type=media_type, content_disposition_type="inline")
+
+
+@core.get(
+    "/api/export/rally-dataset",
+    tags=["export"],
+    summary="Rally-Label-Dataset-ZIP (für TCN-Training)",
+    response_class=FileResponse,
+    responses={
+        404: {
+            "description": "Keine gespeicherten Rally-Labels",
+            "content": {"application/json": {"example": {"detail": "Keine gespeicherten Rally-Labels gefunden."}}},
+        },
+    },
+    dependencies=[Depends(require_export_bearer)],
+)
+def api_export_rally_dataset():
+    """
+    Ein ZIP mit allen gespeicherten Rally-Labels (rally_labels.json + rally_timeseries.csv,
+    über frames- und video-Modus-Tasks hinweg), flach benannt als
+    `{task_stem}_rally.json` / `{task_stem}_timeseries.csv` (task_stem = task_id mit
+    `/` -> `_`). Das ist 1:1 das Eingabeformat, das dev/tcn/train.py (spinevo) per
+    --data_dir erwartet, sodass die Trainingspipeline diese Daten direkt herunterladen
+    und konsumieren kann (analog zu dev/ml/download_weights.py).
+    """
+    pairs: list[tuple[str, Path, Path]] = []
+    manifest: list[dict] = []
+    for tid, td in _iter_task_dirs():
+        rally_json, rally_csv = _rally_paths(tid)
+        if rally_json.exists() and rally_csv.exists():
+            stem = tid.replace("/", "_")
+            pairs.append((stem, rally_json, rally_csv))
+            manifest.append(
+                {
+                    "stem": stem,
+                    "task_id": tid,
+                    "mode": _rally_task_mode(td),
+                    "has_video": _rally_video_path(td) is not None,
+                }
+            )
+
+    if not pairs:
+        raise HTTPException(404, "Keine gespeicherten Rally-Labels gefunden.")
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rally-export-"))
+    zip_path = tmp_dir / "spinevo-rally-dataset.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for stem, rally_json, rally_csv in pairs:
+            zf.write(rally_json, arcname=f"{stem}_rally.json")
+            zf.write(rally_csv, arcname=f"{stem}_timeseries.csv")
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+
+    return FileResponse(
+        path=str(zip_path),
+        filename="spinevo-rally-dataset.zip",
+        media_type="application/zip",
+    )
+
+
+@core.post(
+    "/api/import/yolo-ball",
+    tags=["export"],
+    summary="YOLO-Ball-Trainingsdaten hochladen (Bilder+Labels als ZIP)",
+    dependencies=[Depends(require_export_bearer)],
+)
+async def api_import_yolo_ball(request: Request, source: str = Query("upload")):
+    """
+    Gegenstück zu GET /api/export/rally-dataset: nimmt ein ZIP mit `images/*.jpg`
+    + `labels/*.txt` (YOLO-Format, eine Klasse "ball") als rohen Request-Body
+    entgegen und legt die Paare als neuen Labeler-Task unter DATA_DIR an
+    (`imported/{source}-{timestamp}/frames|labels`). Dadurch werden sie automatisch
+    von /api/stats/labeled-total und /api/export/yolo-dataset-full mitgezählt –
+    gedacht für aus Rally-Label-Videos bootstrap-generierte Ball-Detections
+    (siehe dev/ml/upload_rally_ball_yolo.py in spinevo).
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "Leerer Request-Body (ZIP erwartet).")
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="yolo-import-"))
+    try:
+        zip_path = tmp_dir / "upload.zip"
+        zip_path.write_bytes(body)
+        try:
+            zf = zipfile.ZipFile(zip_path)
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "Ungültiges ZIP.")
+
+        with zf:
+            names = set(zf.namelist())
+            images = sorted(n for n in names if n.startswith("images/") and n.lower().endswith((".jpg", ".jpeg")))
+            if not images:
+                raise HTTPException(400, "ZIP enthält keine images/*.jpg.")
+
+            task_id = f"imported/{slugify(source)}-{int(time.time())}"
+            td = task_dir(task_id)
+            n_pairs = 0
+            for img_name in images:
+                stem = Path(img_name).stem
+                label_name = f"labels/{stem}.txt"
+                if label_name not in names:
+                    continue
+                (td / "frames" / f"{stem}.jpg").write_bytes(zf.read(img_name))
+                (td / "labels" / f"{stem}.txt").write_bytes(zf.read(label_name))
+                n_pairs += 1
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    if n_pairs == 0:
+        raise HTTPException(400, "Keine gültigen Bild+Label-Paare (gleicher Basisname) im ZIP gefunden.")
+
+    return {"ok": True, "task_id": task_id, "pairs_imported": n_pairs}
 
 
 # -------------------- Label speichern (YOLO-Format) --------------------
