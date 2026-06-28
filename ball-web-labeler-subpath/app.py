@@ -464,6 +464,15 @@ class EmptyLabelIn(BaseModel):
     filename: str
 
 
+class PersonPoseIn(BaseModel):
+    """Personen-Box + Pose-Keypoints (P1/P2) zu einem Frame, in Pixelkoordinaten."""
+    filename: str
+    p1_box: list[float] | None = None  # [x1, y1, x2, y2, conf]
+    p2_box: list[float] | None = None
+    p1_pose: dict[str, list[float]] = {}  # {"<landmark_index>": [x, y]}
+    p2_pose: dict[str, list[float]] = {}
+
+
 class TableKeypointIn(BaseModel):
     x: float   # normalisiert 0–1 (0 wenn v=0)
     y: float   # normalisiert 0–1 (0 wenn v=0)
@@ -1771,6 +1780,54 @@ def _rally_task_mode(td: Path) -> str:
     return "video" if _rally_video_path(td) is not None else "frames"
 
 
+# Landmark-Indizes wie in rally_label.js (POSE_LANDMARK_INDICES) bzw. spinevo rallyTypes.ts:
+# Nase, Schultern, Ellbogen, Handgelenke, Hüften, Knie, Knöchel.
+POSE_LANDMARK_INDICES = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
+
+
+def _person_box_columns(prefix: str) -> list[str]:
+    return [f"{prefix}_x1", f"{prefix}_y1", f"{prefix}_x2", f"{prefix}_y2", f"{prefix}_conf"]
+
+
+def _person_pose_columns(prefix: str) -> list[str]:
+    cols: list[str] = []
+    for lm in POSE_LANDMARK_INDICES:
+        cols += [f"{prefix}_lm{lm}_x", f"{prefix}_lm{lm}_y"]
+    return cols
+
+
+def _person_pose_path(td: Path, stem: str) -> Path:
+    return td / "person_pose" / f"{stem}.json"
+
+
+def _read_person_pose(td: Path, stem: str) -> dict:
+    """Liest <task>/person_pose/<stem>.json, falls vorhanden (sonst leeres dict)."""
+    p = _person_pose_path(td, stem)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _fill_person_pose_row(row: dict, pose_data: dict, include_box: bool, include_pose: bool) -> None:
+    """Trägt p1_/p2_-Box- und Pose-Spalten aus pose_data in `row` ein (in-place)."""
+    if include_box:
+        for prefix, key in (("p1", "p1_box"), ("p2", "p2_box")):
+            box = pose_data.get(key)
+            if box and len(box) >= 4:
+                row[f"{prefix}_x1"], row[f"{prefix}_y1"], row[f"{prefix}_x2"], row[f"{prefix}_y2"] = box[0:4]
+                row[f"{prefix}_conf"] = box[4] if len(box) > 4 else None
+    if include_pose:
+        for prefix, key in (("p1", "p1_pose"), ("p2", "p2_pose")):
+            pose = pose_data.get(key) or {}
+            for lm in POSE_LANDMARK_INDICES:
+                pt = pose.get(str(lm))
+                if pt and len(pt) >= 2:
+                    row[f"{prefix}_lm{lm}_x"], row[f"{prefix}_lm{lm}_y"] = pt[0], pt[1]
+
+
 # Codecs, die im Browser (insb. Firefox ohne HW-HEVC) oft nicht abspielbar sind.
 RALLY_TRANSCODE_CODECS = {"hevc", "h265", "mpeg2video"}
 
@@ -1880,18 +1937,33 @@ def _build_rally_timeseries_csv(
     frames: list[str],
     points_map: dict[str, tuple[float, float] | None],
     event_map: dict[int, list[str]],
+    pose_map: dict[str, dict] | None = None,
+    include_box: bool = False,
+    include_pose: bool = False,
 ) -> str:
     """
     Kompakte Zeitreihe:
-    frame,filename,x,y,label
+    frame,filename,x,y[,p1_*,p2_*,p1_lm*,p2_lm*],label
       label: 0=kein_event, 1=start, 2=end, 3=start_und_ende
+    Pose-/Box-Spalten (aus pose_map, befüllt aus <task>/person_pose/*.json)
+    erscheinen nur, wenn include_box/include_pose gesetzt sind.
     """
+    extra_columns: list[str] = []
+    if include_box:
+        extra_columns += _person_box_columns("p1") + _person_box_columns("p2")
+    if include_pose:
+        extra_columns += _person_pose_columns("p1") + _person_pose_columns("p2")
+
     out = io.StringIO()
-    out.write("frame,filename,x,y,label\n")
+    out.write(",".join(["frame", "filename", "x", "y"] + extra_columns + ["label"]) + "\n")
     for i, fname in enumerate(frames):
         point = points_map.get(fname)
-        x = "" if point is None else f"{point[0]:.3f}"
-        y = "" if point is None else f"{point[1]:.3f}"
+        row: dict = {
+            "x": "" if point is None else f"{point[0]:.3f}",
+            "y": "" if point is None else f"{point[1]:.3f}",
+        }
+        if pose_map is not None:
+            _fill_person_pose_row(row, pose_map.get(fname) or {}, include_box, include_pose)
         kinds = set(event_map.get(i, []))
         if "start" in kinds and "end" in kinds:
             label = 3
@@ -1901,7 +1973,12 @@ def _build_rally_timeseries_csv(
             label = 2
         else:
             label = 0
-        out.write(f"{i},{fname},{x},{y},{label}\n")
+        cells = [str(i), fname]
+        for col in ["x", "y"] + extra_columns:
+            v = row.get(col)
+            cells.append("" if v is None else str(v))
+        cells.append(str(label))
+        out.write(",".join(cells) + "\n")
     return out.getvalue()
 
 
@@ -1997,10 +2074,12 @@ def api_rally_task_points(task_id: str):
 def api_rally_task_points_csv(task_id: str):
     """
     Liefert die Ballpunkte als CSV-Text im spinevo-Schema (frame,x,y,confidence
-    [,p1_*,p2_*,p1_lm*,p2_lm*]). Im frames-Modus wird das live aus den
-    YOLO-Labels synthetisiert (keine Pose/Box-Daten dort). Im video-Modus wird
-    die hinterlegte points.csv direkt durchgereicht (fester Pfad im Task-Ordner,
-    kein alternativer Datensatz).
+    [,p1_*,p2_*,p1_lm*,p2_lm*]). Im video-Modus wird die hinterlegte points.csv
+    direkt durchgereicht (fester Pfad im Task-Ordner, kein alternativer Datensatz).
+    Im frames-Modus wird das live aus den YOLO-Labels (Ball) + ggf. vorhandenen
+    <task>/person_pose/<frame>.json (P1/P2-Box+Pose, siehe POST .../person-pose)
+    synthetisiert; Pose-/Box-Spalten erscheinen nur, wenn mindestens ein Frame
+    solche Daten hat (sparse, wie im video-Modus).
     """
     td = task_dir(task_id)
     mode = _rally_task_mode(td)
@@ -2015,7 +2094,9 @@ def api_rally_task_points_csv(task_id: str):
     if not frames:
         raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
     labels_dir = td / "labels"
-    rows = []
+
+    raw_rows = []
+    any_box = any_pose = False
     for idx, img_path in enumerate(frames):
         try:
             with Image.open(img_path) as im:
@@ -2026,15 +2107,28 @@ def api_rally_task_points_csv(task_id: str):
         lab = labels_dir / f"{img_path.stem}.txt"
         if lab.exists() and w > 0 and h > 0:
             point = _read_yolo_ball_center_px(lab, w, h)
-        rows.append(
-            {
-                "frame": idx,
-                "x": None if point is None else round(point[0], 3),
-                "y": None if point is None else round(point[1], 3),
-                "confidence": None if point is None else 1.0,
-            }
-        )
-    return _build_points_csv_text(rows)
+        pose_data = _read_person_pose(td, img_path.stem)
+        any_box = any_box or bool(pose_data.get("p1_box") or pose_data.get("p2_box"))
+        any_pose = any_pose or bool(pose_data.get("p1_pose") or pose_data.get("p2_pose"))
+        raw_rows.append((idx, point, pose_data))
+
+    extra_columns: list[str] = []
+    if any_box:
+        extra_columns += _person_box_columns("p1") + _person_box_columns("p2")
+    if any_pose:
+        extra_columns += _person_pose_columns("p1") + _person_pose_columns("p2")
+
+    rows = []
+    for idx, point, pose_data in raw_rows:
+        row = {
+            "frame": idx,
+            "x": None if point is None else round(point[0], 3),
+            "y": None if point is None else round(point[1], 3),
+            "confidence": None if point is None else 1.0,
+        }
+        _fill_person_pose_row(row, pose_data, any_box, any_pose)
+        rows.append(row)
+    return _build_points_csv_text(rows, extra_columns=extra_columns)
 
 
 @core.get("/api/rally/task/{task_id:path}/labels")
@@ -2122,7 +2216,19 @@ def api_rally_task_save_labels(task_id: str, body: RallySaveIn):
         if not frames:
             raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
         num_frames = len(frames)
+        pose_map: dict[str, dict] = {}
+        any_box = any_pose = False
+        for img_path in frames:
+            pose_data = _read_person_pose(td, img_path.stem)
+            if pose_data:
+                pose_map[img_path.name] = pose_data
+                any_box = any_box or bool(pose_data.get("p1_box") or pose_data.get("p2_box"))
+                any_pose = any_pose or bool(pose_data.get("p1_pose") or pose_data.get("p2_pose"))
         feature_names = ["x", "y"]
+        if any_box:
+            feature_names += _person_box_columns("p1") + _person_box_columns("p2")
+        if any_pose:
+            feature_names += _person_pose_columns("p1") + _person_pose_columns("p2")
         video_path = None
         points_csv_rel = None
         fps = 0.0
@@ -2183,7 +2289,10 @@ def api_rally_task_save_labels(task_id: str, body: RallySaveIn):
                 points_map[fname] = None
                 continue
             points_map[fname] = _read_yolo_ball_center_px(lab, w, h)
-        rally_csv = _build_rally_timeseries_csv([f.name for f in frames], points_map, event_map)
+        rally_csv = _build_rally_timeseries_csv(
+            [f.name for f in frames], points_map, event_map,
+            pose_map=pose_map, include_box=any_box, include_pose=any_pose,
+        )
     rally_csv_path.write_text(rally_csv, encoding="utf-8")
 
     return {
@@ -2356,6 +2465,33 @@ def api_task_save_label(task_id: str, li: LabelIn):
     lab_path.write_text(txt, encoding="utf-8")
 
     return {"ok": True, "saved": lab_path.name}
+
+
+@core.post("/api/task/{task_id:path}/person-pose")
+def api_task_save_person_pose(task_id: str, pp: PersonPoseIn):
+    """
+    Speichert Personen-Boxen + Pose-Keypoints (P1/P2) zu einem Frame (Pixelkoordinaten),
+    eine JSON-Datei pro Frame unter <task>/person_pose/ – analog zu labels/ für die
+    Ball-Box. Wird von api_rally_task_points_csv gelesen, damit das Rally-Label-Tool
+    diese Daten im Pose-Overlay anzeigen kann (genau wie im video-Modus über die
+    p1_/p2_-Spalten der points.csv).
+    """
+    td = task_dir(task_id)
+    img = (td / "frames" / pp.filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+
+    pose_dir = td / "person_pose"
+    pose_dir.mkdir(exist_ok=True)
+    out_path = _person_pose_path(td, Path(pp.filename).stem)
+    out_path.write_text(
+        json.dumps(
+            {"p1_box": pp.p1_box, "p2_box": pp.p2_box, "p1_pose": pp.p1_pose, "p2_pose": pp.p2_pose},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return {"ok": True, "saved": out_path.name}
 
 
 @core.get("/api/task/{task_id:path}/label")
