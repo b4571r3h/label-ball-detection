@@ -1767,6 +1767,12 @@ def _rally_paths(task_id: str) -> tuple[Path, Path]:
     return td / "rally_labels.json", td / "rally_timeseries.csv"
 
 
+def _rally_labels_dir(td: Path) -> Path:
+    """labels_rallye/ wenn vorhanden (vom Upload-Skript befüllt), sonst labels/ als Fallback."""
+    rallye = td / "labels_rallye"
+    return rallye if rallye.is_dir() else td / "labels"
+
+
 def _rally_video_path(td: Path) -> Path | None:
     """Findet eine video.<ext> Datei im Task-Ordner (bestehende Konvention, siehe task_dir())."""
     for vid in sorted(td.glob("video.*")):
@@ -2014,7 +2020,7 @@ def api_rally_tasks():
             continue
 
         frames_dir = td / "frames"
-        labels_dir = td / "labels"
+        labels_dir = _rally_labels_dir(td)
         frames = sorted(frames_dir.glob("*.jpg")) if frames_dir.is_dir() else []
         if not frames:
             continue
@@ -2044,7 +2050,7 @@ def api_rally_task_points(task_id: str):
     frames = sorted((td / "frames").glob("*.jpg"))
     if not frames:
         raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
-    labels_dir = td / "labels"
+    labels_dir = _rally_labels_dir(td)
     rows = []
     for idx, img_path in enumerate(frames):
         fname = img_path.name
@@ -2093,7 +2099,7 @@ def api_rally_task_points_csv(task_id: str):
     frames = sorted((td / "frames").glob("*.jpg"))
     if not frames:
         raise HTTPException(404, "Keine Frames in diesem Task gefunden.")
-    labels_dir = td / "labels"
+    labels_dir = _rally_labels_dir(td)
 
     raw_rows = []
     any_box = any_pose = False
@@ -2275,7 +2281,7 @@ def api_rally_task_save_labels(task_id: str, body: RallySaveIn):
         rally_csv = _build_rally_timeseries_csv_from_points_csv(td / "points.csv", event_map)
     else:
         points_map: dict[str, tuple[float, float] | None] = {}
-        labels_dir = td / "labels"
+        labels_dir = _rally_labels_dir(td)
         for img_path in frames:
             fname = img_path.name
             lab = labels_dir / f"{img_path.stem}.txt"
@@ -2462,6 +2468,32 @@ def api_task_save_label(task_id: str, li: LabelIn):
     txt = f"0 {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n"
 
     lab_path = (td / "labels" / (Path(li.filename).stem + ".txt")).resolve()
+    lab_path.write_text(txt, encoding="utf-8")
+
+    return {"ok": True, "saved": lab_path.name}
+
+
+@core.post("/api/task/{task_id:path}/rally-label")
+def api_task_save_rally_label(task_id: str, li: LabelIn):
+    """Schreibt Ball-Label in labels_rallye/ (für upload_rally_ball_yolo.py).
+    Erstellt labels_rallye/ bei Bedarf; labels/ bleibt unberührt."""
+    td = task_dir(task_id)
+    img = (td / "frames" / li.filename).resolve()
+    if not img.exists():
+        raise HTTPException(404, "Frame nicht gefunden")
+
+    W, H = image_size(img)
+    bw = bh = max(2.0, li.box)
+    x = min(max(li.cx / W, 0.0), 1.0)
+    y = min(max(li.cy / H, 0.0), 1.0)
+    w = min(max(bw / W, 0.0), 1.0)
+    h = min(max(bh / H, 0.0), 1.0)
+
+    txt = f"0 {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n"
+
+    rallye_dir = td / "labels_rallye"
+    rallye_dir.mkdir(exist_ok=True)
+    lab_path = (rallye_dir / (Path(li.filename).stem + ".txt")).resolve()
     lab_path.write_text(txt, encoding="utf-8")
 
     return {"ok": True, "saved": lab_path.name}
