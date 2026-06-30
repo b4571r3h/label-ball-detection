@@ -1768,9 +1768,8 @@ def _rally_paths(task_id: str) -> tuple[Path, Path]:
 
 
 def _rally_labels_dir(td: Path) -> Path:
-    """labels_rallye/ wenn vorhanden (vom Upload-Skript befüllt), sonst labels/ als Fallback."""
-    rallye = td / "labels_rallye"
-    return rallye if rallye.is_dir() else td / "labels"
+    """labels_rallye/ für rally-spezifische Ball-Labels (immer, ohne Fallback auf labels/)."""
+    return td / "labels_rallye"
 
 
 def _rally_video_path(td: Path) -> Path | None:
