@@ -556,6 +556,12 @@ def import_review_html():
     return FileResponse(str(STATIC_DIR / "import_review.html"))
 
 
+@core.get("/prediction-review", include_in_schema=False)
+def prediction_review_html():
+    """Review-Seite für hochgeladene Modell-Vorhersagen (Ball/Pose/TCN-Ballwechsel)."""
+    return FileResponse(str(STATIC_DIR / "prediction_review.html"))
+
+
 @core.get("/api/health")
 def api_health():
     return {"status": "ok"}
@@ -2437,6 +2443,119 @@ async def api_import_yolo_ball(request: Request, source: str = Query("upload")):
         raise HTTPException(400, "Keine gültigen Bild+Label-Paare (gleicher Basisname) im ZIP gefunden.")
 
     return {"ok": True, "task_id": task_id, "pairs_imported": n_pairs}
+
+
+# -------------------- Prediction-Review (spinevo Modell-Vorhersagen) --------------------
+
+PREDICTIONS_FILENAME = "predictions.json"
+
+
+def _predictions_path(td: Path) -> Path:
+    return td / PREDICTIONS_FILENAME
+
+
+def _existing_task_dir(task_id: str) -> Path:
+    """Wie task_dir(), aber ohne mkdir-Seiteneffekt und mit Traversal-Schutz."""
+    p = (DATA_DIR / task_id).resolve()
+    if not str(p).startswith(str(DATA_DIR.resolve())) or not p.is_dir():
+        raise HTTPException(404, f"Task nicht gefunden: {task_id}")
+    return p
+
+
+@core.post(
+    "/api/predictions/upload",
+    tags=["export"],
+    summary="Modell-Vorhersagen (Ball/Pose/TCN-Ballwechsel) + optional Video hochladen",
+    dependencies=[Depends(require_export_bearer)],
+)
+async def api_predictions_upload(
+    predictions: UploadFile = File(...),
+    video: UploadFile | None = File(None),
+    points_csv: UploadFile | None = File(None),
+    task_id: str = Form(""),
+    task_name: str = Form(""),
+):
+    """
+    Gegenstück zu spinevo dev/tcn/predict_video.py. Legt einen video-Modus-Task
+    mit predictions.json an; points.csv (spinevo-Schema frame,x,y,confidence
+    [,p1_*,p2_*,lm-Spalten]) liefert das Ball/Pose-Overlay über die bestehende
+    Route /api/rally/task/{id}/points.csv. Der Task ist damit auch im
+    Rally-Label-Tool sichtbar → Ground-Truth nachlabeln und in
+    /prediction-review vergleichen. Mit task_id werden die Vorhersagen an einen
+    BESTEHENDEN Task gehängt (Video-Upload entfällt dann).
+    """
+    try:
+        pred = json.loads((await predictions.read()).decode("utf-8"))
+    except Exception:
+        raise HTTPException(400, "predictions: kein gültiges JSON.")
+    if not isinstance(pred, dict) or not isinstance(pred.get("rallies"), list):
+        raise HTTPException(400, "predictions-JSON braucht mindestens ein 'rallies'-Array.")
+
+    if task_id:
+        td = _existing_task_dir(task_id)
+    else:
+        if video is None:
+            raise HTTPException(400, "Ohne task_id muss ein Video hochgeladen werden.")
+        ext = Path(video.filename or "").suffix.lower()
+        if ext not in ALLOWED_VIDEO_EXT:
+            raise HTTPException(400, f"Videoformat nicht erlaubt: {ext}")
+        task_id = new_task_id(task_name or Path(video.filename or "").stem)
+        td = task_dir(task_id)
+        (td / f"video{ext}").write_bytes(await video.read())
+        write_meta(td, {
+            "source": "prediction-upload",
+            "filename": video.filename,
+            "created": dt.datetime.utcnow().isoformat() + "Z",
+        })
+
+    if points_csv is not None:
+        (td / "points.csv").write_bytes(await points_csv.read())
+
+    pred.setdefault("uploaded_at", dt.datetime.utcnow().isoformat() + "Z")
+    _predictions_path(td).write_text(json.dumps(pred, ensure_ascii=False), encoding="utf-8")
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "rallies": len(pred.get("rallies", [])),
+        "has_video": _rally_video_path(td) is not None,
+        "has_points_csv": (td / "points.csv").exists(),
+    }
+
+
+@core.get("/api/predictions/tasks")
+def api_predictions_tasks():
+    """Alle Tasks mit predictions.json (Quelle für die /prediction-review-Seite)."""
+    out = []
+    for tid, td in _iter_task_dirs():
+        pf = _predictions_path(td)
+        if not pf.exists():
+            continue
+        try:
+            pred = json.loads(pf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        out.append({
+            "task_id": tid,
+            "mode": _rally_task_mode(td),
+            "uploaded_at": pred.get("uploaded_at"),
+            "source_video": pred.get("source_video"),
+            "num_frames": pred.get("num_frames"),
+            "n_rallies": len(pred.get("rallies", [])),
+            "has_rally_labels": (td / "rally_labels.json").exists(),
+        })
+    out.sort(key=lambda t: t.get("uploaded_at") or "", reverse=True)
+    return {"tasks": out}
+
+
+@core.get("/api/predictions/task/{task_id:path}")
+def api_predictions_task(task_id: str):
+    """Liefert die predictions.json eines Tasks."""
+    td = _existing_task_dir(task_id)
+    pf = _predictions_path(td)
+    if not pf.exists():
+        raise HTTPException(404, "Keine predictions.json in diesem Task.")
+    return json.loads(pf.read_text(encoding="utf-8"))
 
 
 # -------------------- Label speichern (YOLO-Format) --------------------

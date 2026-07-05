@@ -108,3 +108,22 @@ Unter `LABEL_DATA_DIR/<task_id>/`:
 - `GET /api/rally/task/{task_id}/points`
 - `GET /api/rally/task/{task_id}/labels`
 - `POST /api/rally/task/{task_id}/labels`
+
+## Prediction-Review (neu)
+
+Review-Seite für Modell-Vorhersagen aus spinevo (`dev/tcn/predict_video.py`):
+Ball/Pose-Overlay, TCN-Wahrscheinlichkeits-Kurven (Threshold/Min-Gap live
+nachjustierbar) und erkannte Ballwechsel als klickbare Segmente. Hat der Task
+Rally-Labels (Ground Truth), werden Predicted und Labels als zwei Spuren
+verglichen (inkl. mittlerer Start-Abweichung).
+
+- UI: `/prediction-review`
+- Upload (Bearer wie Export): `POST /api/predictions/upload` — multipart mit
+  `predictions` (JSON, braucht mind. `rallies`-Array; optional `prob_start`/
+  `prob_end`-Kurven), optional `video` (legt neuen video-Modus-Task an),
+  optional `points_csv` (spinevo-Schema, liefert das Overlay) und optional
+  `task_id` (an bestehenden Task hängen statt neues Video).
+- `GET /api/predictions/tasks`, `GET /api/predictions/task/{task_id}`
+- Gespeichert wird `predictions.json` im Task-Ordner; Video/points.csv nutzen
+  die bestehende Task-Infrastruktur. Prediction-Tasks erscheinen dadurch auch
+  im Rally-Label-Tool → Ground Truth nachlabeln und direkt vergleichen.
