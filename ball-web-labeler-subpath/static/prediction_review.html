@@ -80,9 +80,12 @@
 
     <div class="card" id="curveCard">
       <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-        <strong>TCN-Wahrscheinlichkeiten <span class="muted">(cyan = Start, orange = Ende)</span></strong>
+        <strong>TCN-Wahrscheinlichkeiten <span id="curveLegend" class="muted">(cyan = Start, orange = Ende)</span></strong>
         <div class="row">
           <label class="muted">Threshold <input id="thrInput" type="number" min="0" max="1" step="0.05" value="0.35" /></label>
+          <label class="muted" id="hystLabel" style="display:none;">Hysterese <input id="hystInput" type="number" min="0" max="0.5" step="0.02" value="0.12" /></label>
+          <label class="muted" id="smoothLabel" style="display:none;">Glättung <input id="smoothInput" type="number" min="1" step="2" value="7" /></label>
+          <label class="muted" id="minRallyLabel" style="display:none;">Min-Rally <input id="minRallyInput" type="number" min="1" step="1" value="6" /></label>
           <label class="muted">Min-Gap (Frames) <input id="gapInput" type="number" min="1" step="1" value="15" /></label>
           <button id="applyBtn" class="btn">Neu berechnen</button>
           <button id="resetBtn" class="btn">Upload-Stand</button>

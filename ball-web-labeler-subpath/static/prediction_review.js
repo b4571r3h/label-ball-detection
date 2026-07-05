@@ -113,6 +113,77 @@
     return kept.sort((a, b) => a - b);
   }
 
+  // ---------------------------------------------------------------------
+  // Rally-State-Post-Processing (Port von spinevo predict_rally_state.py)
+  // ---------------------------------------------------------------------
+  function boxSmooth1d(x, window) {
+    if (window <= 1) return x.slice();
+    const w = window % 2 === 0 ? window + 1 : window;
+    const pad = Math.floor(w / 2);
+    const padded = [];
+    for (let i = 0; i < pad; i++) padded.push(x[0] ?? 0);
+    padded.push(...x);
+    for (let i = 0; i < pad; i++) padded.push(x[x.length - 1] ?? 0);
+    const out = [];
+    for (let i = 0; i < x.length; i++) {
+      let s = 0;
+      for (let k = 0; k < w; k++) s += padded[i + k];
+      out.push(s / w);
+    }
+    return out;
+  }
+
+  function hysteresisMask(prob, thrHigh, thrLow) {
+    let state = 0;
+    return prob.map((p) => {
+      if (state === 0) { if (p >= thrHigh) state = 1; }
+      else if (p <= thrLow) state = 0;
+      return state;
+    });
+  }
+
+  function removeShortRuns(binary, minLen, value) {
+    if (minLen <= 1) return binary.slice();
+    const b = binary.slice();
+    let i = 0;
+    while (i < b.length) {
+      if (b[i] !== value) { i += 1; continue; }
+      let j = i;
+      while (j < b.length && b[j] === value) j += 1;
+      if (j - i < minLen) for (let k = i; k < j; k++) b[k] = 1 - value;
+      i = j;
+    }
+    return b;
+  }
+
+  function ralliesFromStateCurve(probRaw, smooth, thr, hysteresis, minRally, minGap) {
+    const probS = boxSmooth1d(probRaw, Math.max(1, smooth));
+    let binary;
+    if (hysteresis > 0) {
+      const half = hysteresis / 2;
+      binary = hysteresisMask(probS, Math.min(1, thr + half), Math.max(0, thr - half));
+    } else {
+      binary = probS.map((p) => (p >= thr ? 1 : 0));
+    }
+    if (minRally > 1) binary = removeShortRuns(binary, minRally, 1);
+    if (minGap > 1) binary = removeShortRuns(binary, minGap, 0);
+
+    const rallies = [];
+    let i = 0;
+    while (i < binary.length) {
+      while (i < binary.length && !binary[i]) i++;
+      if (i >= binary.length) break;
+      const s = i;
+      while (i < binary.length && binary[i]) i++;
+      const e = i - 1;
+      rallies.push({
+        start_frame: s, end_frame: e,
+        start_conf: probS[s], end_conf: probS[e],
+      });
+    }
+    return { rallies, probSmooth: probS };
+  }
+
   function ralliesFromCurves(probStart, probEnd, thr, minGap) {
     const starts = findPeaks(probStart, thr, minGap);
     const ends = findPeaks(probEnd, thr, minGap);
@@ -153,8 +224,15 @@
   const overlay = document.getElementById("overlay");
   const ctx = overlay.getContext("2d");
   const curveCanvas = document.getElementById("curveCanvas");
+  const curveLegend = document.getElementById("curveLegend");
   const thrInput = document.getElementById("thrInput");
   const gapInput = document.getElementById("gapInput");
+  const hystInput = document.getElementById("hystInput");
+  const smoothInput = document.getElementById("smoothInput");
+  const minRallyInput = document.getElementById("minRallyInput");
+  const hystLabel = document.getElementById("hystLabel");
+  const smoothLabel = document.getElementById("smoothLabel");
+  const minRallyLabel = document.getElementById("minRallyLabel");
   const applyBtn = document.getElementById("applyBtn");
   const resetBtn = document.getElementById("resetBtn");
   const matchInfo = document.getElementById("matchInfo");
@@ -368,10 +446,17 @@
   // ---------------------------------------------------------------------
   // Kurven-Canvas: prob_start / prob_end + Threshold-Linie + Rally-Streifen
   // ---------------------------------------------------------------------
+  function isStateModel() {
+    return !!(pred && Array.isArray(pred.prob_in_rally));
+  }
+
   function drawCurves() {
     const c = curveCanvas.getContext("2d");
-    const ps = pred && Array.isArray(pred.prob_start) ? pred.prob_start : null;
-    const pe = pred && Array.isArray(pred.prob_end) ? pred.prob_end : null;
+    const stateMode = isStateModel();
+    const ps = stateMode
+      ? pred.prob_in_rally
+      : (pred && Array.isArray(pred.prob_start) ? pred.prob_start : null);
+    const pe = stateMode ? null : (pred && Array.isArray(pred.prob_end) ? pred.prob_end : null);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const rect = curveCanvas.getBoundingClientRect();
     const cssW = Math.max(280, rect.width || 640);
@@ -403,23 +488,26 @@
       c.fillRect(x0, padT, Math.max(1, x1 - x0), plotH);
     }
 
-    // Achsen + Threshold
+    // Achsen + Threshold (im Rally-State-Modus als Hysterese-Band)
     c.strokeStyle = "#334155";
     c.lineWidth = 1;
     c.strokeRect(padL, padT, plotW, plotH);
     const thr = Number(thrInput.value) || 0;
+    const hyst = stateMode ? (Number(hystInput.value) || 0) : 0;
     c.strokeStyle = "rgba(255,255,255,0.35)";
     c.setLineDash([4, 4]);
-    c.beginPath();
-    c.moveTo(padL, yAt(thr));
-    c.lineTo(padL + plotW, yAt(thr));
-    c.stroke();
+    for (const t of hyst > 0 ? [thr + hyst / 2, thr - hyst / 2] : [thr]) {
+      c.beginPath();
+      c.moveTo(padL, yAt(t));
+      c.lineTo(padL + plotW, yAt(t));
+      c.stroke();
+    }
     c.setLineDash([]);
 
-    const drawLine = (arr, color) => {
+    const drawLine = (arr, color, width = 1.5) => {
       if (!arr) return;
       c.strokeStyle = color;
-      c.lineWidth = 1.5;
+      c.lineWidth = width;
       c.beginPath();
       for (let i = 0; i < arr.length; i++) {
         const x = xAt(i), y = yAt(arr[i]);
@@ -427,8 +515,14 @@
       }
       c.stroke();
     };
-    drawLine(ps, "rgba(34,211,238,0.9)");
-    drawLine(pe, "rgba(249,115,22,0.9)");
+    if (stateMode) {
+      // Roh dünn + geglättet fett
+      drawLine(ps, "rgba(34,211,238,0.35)", 1);
+      drawLine(boxSmooth1d(ps, Math.max(1, Number(smoothInput.value) || 1)), "rgba(34,211,238,0.95)", 2);
+    } else {
+      drawLine(ps, "rgba(34,211,238,0.9)");
+      drawLine(pe, "rgba(249,115,22,0.9)");
+    }
 
     // aktuelle Position
     c.strokeStyle = "#fff";
@@ -632,6 +726,24 @@
       thrInput.value = String((pred.model && pred.model.threshold) || 0.35);
       gapInput.value = String((pred.model && pred.model.min_gap_frames) || 15);
 
+      // Rally-State-Modus: eigene Post-Processing-Controls + Legende
+      const stateMode = isStateModel();
+      const pp = (pred.model && pred.model.postprocess) || {};
+      hystLabel.style.display = stateMode ? "" : "none";
+      smoothLabel.style.display = stateMode ? "" : "none";
+      minRallyLabel.style.display = stateMode ? "" : "none";
+      if (stateMode) {
+        smoothInput.value = String(pp.smooth_frames ?? 7);
+        hystInput.value = String(pp.hysteresis ?? 0.12);
+        minRallyInput.value = String(pp.min_rally_frames ?? 6);
+        gapInput.value = String(pp.min_gap_frames ?? 5);
+        if (pp.thr_center != null) thrInput.value = String(pp.thr_center);
+        else if (pp.threshold != null) thrInput.value = String(pp.threshold);
+        curveLegend.textContent = "(P(in Rally): dünn = roh, fett = geglättet; gestrichelt = Hysterese-Band)";
+      } else {
+        curveLegend.textContent = "(cyan = Start, orange = Ende)";
+      }
+
       const tl = await jfetch(API(`/api/predictions/tasks`));
       const meta = (tl.tasks || []).find((t) => t.task_id === taskId);
       mode = (meta && meta.mode) || "video";
@@ -674,18 +786,25 @@
   }
 
   function recomputeFromCurves() {
-    if (!pred || !Array.isArray(pred.prob_start) || !Array.isArray(pred.prob_end)) {
+    const thr = Number(thrInput.value) || 0.35;
+    const gap = Math.max(1, Math.round(Number(gapInput.value) || 15));
+    if (isStateModel()) {
+      const smooth = Math.max(1, Math.round(Number(smoothInput.value) || 7));
+      const hyst = Math.max(0, Number(hystInput.value) || 0);
+      const minRally = Math.max(1, Math.round(Number(minRallyInput.value) || 6));
+      rallies = ralliesFromStateCurve(pred.prob_in_rally, smooth, thr, hyst, minRally, gap).rallies;
+      setStatus(`Neu berechnet: ${rallies.length} Rallies (thr=${thr}, hyst=${hyst}, glättung=${smooth})`);
+    } else if (pred && Array.isArray(pred.prob_start) && Array.isArray(pred.prob_end)) {
+      rallies = ralliesFromCurves(pred.prob_start, pred.prob_end, thr, gap);
+      setStatus(`Neu berechnet: ${rallies.length} Rallies (thr=${thr}, min_gap=${gap})`);
+    } else {
       setStatus("Keine Kurven im Upload – Neuberechnung nicht möglich.", true);
       return;
     }
-    const thr = Number(thrInput.value) || 0.35;
-    const gap = Math.max(1, Math.round(Number(gapInput.value) || 15));
-    rallies = ralliesFromCurves(pred.prob_start, pred.prob_end, thr, gap);
     playingRow = -1;
     renderRallyList();
     renderMatchInfo();
     renderFrame();
-    setStatus(`Neu berechnet: ${rallies.length} Rallies (thr=${thr}, min_gap=${gap})`);
   }
 
   function resetToUpload() {
