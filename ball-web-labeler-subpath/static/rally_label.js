@@ -319,12 +319,14 @@
       ctx.setLineDash([]);
     }
 
-    // Netzlinie (gelabelt oder aus den Seitenmitten des Vierecks abgeleitet)
+    // Netzlinie: gelabelt, oder abgeleitet als Verbindung der Kantenmitten
+    // von naher (P1-P2) und ferner (P4-P3) Tischkante - das Netz trennt die
+    // beiden Spielerhälften
     let netLine = netPts.length === 2 ? netPts : null;
     if (!netLine && tablePts.length === 4 && tableCapture === null) {
       netLine = [
-        { x: (tablePts[0].x + tablePts[3].x) / 2, y: (tablePts[0].y + tablePts[3].y) / 2 },
-        { x: (tablePts[1].x + tablePts[2].x) / 2, y: (tablePts[1].y + tablePts[2].y) / 2 },
+        { x: (tablePts[0].x + tablePts[1].x) / 2, y: (tablePts[0].y + tablePts[1].y) / 2 },
+        { x: (tablePts[3].x + tablePts[2].x) / 2, y: (tablePts[3].y + tablePts[2].y) / 2 },
       ];
     }
     if (netLine) {

@@ -2437,19 +2437,21 @@ def api_export_rally_dataset():
     --data_dir erwartet, sodass die Trainingspipeline diese Daten direkt herunterladen
     und konsumieren kann (analog zu dev/ml/download_weights.py).
     """
-    pairs: list[tuple[str, Path, Path]] = []
+    pairs: list[tuple[str, Path, Path, Path]] = []
     manifest: list[dict] = []
     for tid, td in _iter_task_dirs():
         rally_json, rally_csv = _rally_paths(tid)
         if rally_json.exists() and rally_csv.exists():
             stem = tid.replace("/", "_")
-            pairs.append((stem, rally_json, rally_csv))
+            calib_path = _rally_table_calib_path(td)
+            pairs.append((stem, rally_json, rally_csv, calib_path))
             manifest.append(
                 {
                     "stem": stem,
                     "task_id": tid,
                     "mode": _rally_task_mode(td),
                     "has_video": _rally_video_path(td) is not None,
+                    "has_table_calib": calib_path.exists(),
                 }
             )
 
@@ -2459,8 +2461,19 @@ def api_export_rally_dataset():
     tmp_dir = Path(tempfile.mkdtemp(prefix="rally-export-"))
     zip_path = tmp_dir / "spinevo-rally-dataset.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for stem, rally_json, rally_csv in pairs:
-            zf.write(rally_json, arcname=f"{stem}_rally.json")
+        for stem, rally_json, rally_csv, calib_path in pairs:
+            # Tisch/Netz-Kalibrierung (falls gelabelt) in die Rally-JSON injizieren,
+            # damit sie ohne Zusatzdatei durch fetch_rally_data.py -> Training fließt
+            if calib_path.exists():
+                try:
+                    payload = json.loads(rally_json.read_text(encoding="utf-8"))
+                    payload["table_calib"] = json.loads(calib_path.read_text(encoding="utf-8"))
+                    zf.writestr(f"{stem}_rally.json",
+                                json.dumps(payload, ensure_ascii=False, indent=2))
+                except Exception:
+                    zf.write(rally_json, arcname=f"{stem}_rally.json")
+            else:
+                zf.write(rally_json, arcname=f"{stem}_rally.json")
             zf.write(rally_csv, arcname=f"{stem}_timeseries.csv")
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
 
