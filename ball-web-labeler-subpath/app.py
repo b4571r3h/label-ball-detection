@@ -471,6 +471,16 @@ class PersonPoseIn(BaseModel):
     p2_box: list[float] | None = None
     p1_pose: dict[str, list[float]] = {}  # {"<landmark_index>": [x, y]}
     p2_pose: dict[str, list[float]] = {}
+    # Nicht-leer (z. B. "v2"): parallele Variante unter person_pose_<variant>/ –
+    # der bestehende Stand bleibt für das Operator-Review (/pose-review) erhalten
+    variant: str = ""
+
+
+class PoseReviewIn(BaseModel):
+    """Operator-Urteil zum Pose-Variantenvergleich eines Tasks."""
+    verdict: str        # "besser" | "gleich" | "schlechter"
+    comment: str = ""
+    variant: str = "v2"
 
 
 class TableKeypointIn(BaseModel):
@@ -560,6 +570,12 @@ def table_labeling_html():
 def rally_label_html():
     """Rally-Labeling (Start/Ende je Frame auf Basis vorhandener Ball-Labels)."""
     return FileResponse(str(STATIC_DIR / "rally_label.html"))
+
+
+@core.get("/pose-review", include_in_schema=False)
+def pose_review_html():
+    """Operator-Review: alter vs. neuer Pose-Stand (Variante) im Vergleich."""
+    return FileResponse(str(STATIC_DIR / "pose_review.html"))
 
 
 @core.get("/import-review", include_in_schema=False)
@@ -1819,13 +1835,28 @@ def _person_pose_columns(prefix: str) -> list[str]:
     return cols
 
 
-def _person_pose_path(td: Path, stem: str) -> Path:
-    return td / "person_pose" / f"{stem}.json"
+_POSE_VARIANT_RE = re.compile(r"^[a-z0-9_-]{1,16}$")
 
 
-def _read_person_pose(td: Path, stem: str) -> dict:
-    """Liest <task>/person_pose/<stem>.json, falls vorhanden (sonst leeres dict)."""
-    p = _person_pose_path(td, stem)
+def _validated_pose_variant(variant: str) -> str:
+    """Leerer String = Hauptstand; sonst Slug-Validierung (Pfadsicherheit)."""
+    v = (variant or "").strip()
+    if v and not _POSE_VARIANT_RE.fullmatch(v):
+        raise HTTPException(400, "Ungültige Pose-Variante (erlaubt: a-z, 0-9, _, -; max. 16 Zeichen).")
+    return v
+
+
+def _person_pose_dir(td: Path, variant: str = "") -> Path:
+    return td / (f"person_pose_{variant}" if variant else "person_pose")
+
+
+def _person_pose_path(td: Path, stem: str, variant: str = "") -> Path:
+    return _person_pose_dir(td, variant) / f"{stem}.json"
+
+
+def _read_person_pose(td: Path, stem: str, variant: str = "") -> dict:
+    """Liest <task>/person_pose[_<variant>]/<stem>.json, falls vorhanden (sonst leeres dict)."""
+    p = _person_pose_path(td, stem, variant)
     if not p.exists():
         return {}
     try:
@@ -2096,20 +2127,25 @@ def api_rally_task_points(task_id: str):
 
 
 @core.get("/api/rally/task/{task_id:path}/points.csv", response_class=PlainTextResponse)
-def api_rally_task_points_csv(task_id: str):
+def api_rally_task_points_csv(task_id: str, variant: str = Query("")):
     """
     Liefert die Ballpunkte als CSV-Text im spinevo-Schema (frame,x,y,confidence
-    [,p1_*,p2_*,p1_lm*,p2_lm*]). Im video-Modus wird die hinterlegte points.csv
+    [,p1_*,p2_*,p1_lm*,p2_lm*]). Im video-modus wird die hinterlegte points.csv
     direkt durchgereicht (fester Pfad im Task-Ordner, kein alternativer Datensatz).
     Im frames-Modus wird das live aus den YOLO-Labels (Ball) + ggf. vorhandenen
     <task>/person_pose/<frame>.json (P1/P2-Box+Pose, siehe POST .../person-pose)
     synthetisiert; Pose-/Box-Spalten erscheinen nur, wenn mindestens ein Frame
     solche Daten hat (sparse, wie im video-Modus).
+
+    ?variant=v2: nutzt person_pose_v2/ statt person_pose/ (Pose-Review-Vergleich).
     """
     td = task_dir(task_id)
     mode = _rally_task_mode(td)
+    variant = _validated_pose_variant(variant)
 
     if mode == "video":
+        if variant:
+            raise HTTPException(404, "Pose-Varianten gibt es nur für frames-Modus-Tasks.")
         csv_path = td / "points.csv"
         if not csv_path.exists():
             raise HTTPException(404, "Nicht gefunden: points.csv im Task-Ordner.")
@@ -2132,7 +2168,7 @@ def api_rally_task_points_csv(task_id: str):
         lab = labels_dir / f"{img_path.stem}.txt"
         if lab.exists() and w > 0 and h > 0:
             point = _read_yolo_ball_center_px(lab, w, h)
-        pose_data = _read_person_pose(td, img_path.stem)
+        pose_data = _read_person_pose(td, img_path.stem, variant)
         any_box = any_box or bool(pose_data.get("p1_box") or pose_data.get("p2_box"))
         any_pose = any_pose or bool(pose_data.get("p1_pose") or pose_data.get("p2_pose"))
         raw_rows.append((idx, point, pose_data))
@@ -2725,9 +2761,10 @@ def api_task_save_person_pose(task_id: str, pp: PersonPoseIn):
     if not img.exists():
         raise HTTPException(404, "Frame nicht gefunden")
 
-    pose_dir = td / "person_pose"
+    variant = _validated_pose_variant(pp.variant)
+    pose_dir = _person_pose_dir(td, variant)
     pose_dir.mkdir(exist_ok=True)
-    out_path = _person_pose_path(td, Path(pp.filename).stem)
+    out_path = _person_pose_path(td, Path(pp.filename).stem, variant)
     out_path.write_text(
         json.dumps(
             {"p1_box": pp.p1_box, "p2_box": pp.p2_box, "p1_pose": pp.p1_pose, "p2_pose": pp.p2_pose},
@@ -2735,7 +2772,158 @@ def api_task_save_person_pose(task_id: str, pp: PersonPoseIn):
         ),
         encoding="utf-8",
     )
-    return {"ok": True, "saved": out_path.name}
+    return {"ok": True, "saved": out_path.name, "variant": variant or None}
+
+
+# ─── Pose-Review: Operator-Vergleich alter vs. neuer Pose-Stand ──────────────
+
+def _pose_review_path(td: Path) -> Path:
+    return td / "pose_review.json"
+
+
+def _read_pose_review(td: Path) -> dict:
+    p = _pose_review_path(td)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _rebuild_rally_timeseries(td: Path, task_id: str) -> bool:
+    """
+    Baut <task>/rally_timeseries.csv aus den GESPEICHERTEN Rally-Labels und dem
+    aktuellen person_pose/-Stand neu (frames-Modus). Teilmenge der Logik von
+    api_rally_task_save_labels – Labels selbst bleiben unverändert. Wird nach
+    dem Promote einer Pose-Variante gebraucht, damit der Trainings-Export
+    (rally-dataset-ZIP) den neuen Pose-Stand enthält.
+    """
+    rally_json_path, rally_csv_path = _rally_paths(task_id)
+    if not rally_json_path.exists() or _rally_task_mode(td) != "frames":
+        return False
+    try:
+        raw = json.loads(rally_json_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    event_map: dict[int, list[str]] = defaultdict(list)
+    for e in raw.get("events", []):
+        if isinstance(e, dict) and isinstance(e.get("frame"), int) and e.get("kind") in ("start", "end"):
+            event_map[e["frame"]].append(e["kind"])
+
+    frames = sorted((td / "frames").glob("*.jpg"))
+    if not frames:
+        return False
+    labels_dir = _rally_labels_dir(td)
+    pose_map: dict[str, dict] = {}
+    any_box = any_pose = False
+    points_map: dict[str, tuple[float, float] | None] = {}
+    for img_path in frames:
+        pose_data = _read_person_pose(td, img_path.stem)
+        if pose_data:
+            pose_map[img_path.name] = pose_data
+            any_box = any_box or bool(pose_data.get("p1_box") or pose_data.get("p2_box"))
+            any_pose = any_pose or bool(pose_data.get("p1_pose") or pose_data.get("p2_pose"))
+        lab = labels_dir / f"{img_path.stem}.txt"
+        if not lab.exists():
+            points_map[img_path.name] = None
+            continue
+        try:
+            with Image.open(img_path) as im:
+                w, h = im.size
+        except Exception:
+            points_map[img_path.name] = None
+            continue
+        points_map[img_path.name] = _read_yolo_ball_center_px(lab, w, h)
+
+    rally_csv = _build_rally_timeseries_csv(
+        [f.name for f in frames], points_map, event_map,
+        pose_map=pose_map, include_box=any_box, include_pose=any_pose,
+    )
+    rally_csv_path.write_text(rally_csv, encoding="utf-8")
+    return True
+
+
+@core.get("/api/rally/task/{task_id:path}/pose-review")
+def api_rally_task_get_pose_review(task_id: str):
+    td = task_dir(task_id)
+    review = _read_pose_review(td)
+    return {"task_id": task_id, "exists": bool(review), **review}
+
+
+@core.post("/api/rally/task/{task_id:path}/pose-review")
+def api_rally_task_save_pose_review(task_id: str, body: PoseReviewIn):
+    """Operator-Urteil zum Varianten-Vergleich speichern (pose_review.json im Task)."""
+    if body.verdict not in ("besser", "gleich", "schlechter"):
+        raise HTTPException(400, "verdict muss 'besser', 'gleich' oder 'schlechter' sein.")
+    td = task_dir(task_id)
+    variant = _validated_pose_variant(body.variant) or "v2"
+    review = _read_pose_review(td)
+    review.update({
+        "verdict": body.verdict,
+        "comment": body.comment,
+        "variant": variant,
+        "reviewed_at": dt.datetime.utcnow().isoformat() + "Z",
+    })
+    _pose_review_path(td).write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "task_id": task_id, "verdict": body.verdict}
+
+
+@core.post("/api/rally/task/{task_id:path}/person-pose/promote")
+def api_rally_task_promote_person_pose(task_id: str, variant: str = Query("v2")):
+    """
+    Macht die Pose-Variante zum Hauptstand: person_pose/ wird nach
+    person_pose_backup_<ts>/ gesichert, person_pose_<variant>/ übernimmt, und
+    rally_timeseries.csv wird mit den neuen Posen neu gebaut (Export-Konsistenz).
+    """
+    td = task_dir(task_id)
+    variant = _validated_pose_variant(variant)
+    if not variant:
+        raise HTTPException(400, "variant erforderlich (z. B. 'v2').")
+    src = _person_pose_dir(td, variant)
+    if not src.is_dir() or not any(src.glob("*.json")):
+        raise HTTPException(404, f"Keine Variante '{variant}' für diesen Task.")
+
+    cur = _person_pose_dir(td)
+    backed_up = None
+    if cur.is_dir():
+        backed_up = f"person_pose_backup_{dt.datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        cur.rename(td / backed_up)
+    src.rename(td / "person_pose")
+
+    rebuilt = _rebuild_rally_timeseries(td, task_id)
+
+    review = _read_pose_review(td)
+    review.update({"promoted_at": dt.datetime.utcnow().isoformat() + "Z", "promoted_variant": variant})
+    _pose_review_path(td).write_text(json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "task_id": task_id, "backup": backed_up, "timeseries_rebuilt": rebuilt}
+
+
+@core.get("/api/pose-review/summary")
+def api_pose_review_summary(variant: str = Query("v2")):
+    """Status aller frames-Tasks für das Pose-Review (Quelle für /pose-review + Bericht)."""
+    variant = _validated_pose_variant(variant) or "v2"
+    items = []
+    for tid, td in _iter_task_dirs():
+        if _rally_task_mode(td) != "frames":
+            continue
+        n_variant = len(list(_person_pose_dir(td, variant).glob("*.json"))) if _person_pose_dir(td, variant).is_dir() else 0
+        n_main = len(list(_person_pose_dir(td).glob("*.json"))) if _person_pose_dir(td).is_dir() else 0
+        review = _read_pose_review(td)
+        if n_variant == 0 and n_main == 0 and not review:
+            continue
+        items.append({
+            "task_id": tid,
+            "frames_variant": n_variant,
+            "frames_main": n_main,
+            "verdict": review.get("verdict"),
+            "comment": review.get("comment", ""),
+            "reviewed_at": review.get("reviewed_at"),
+            "promoted_at": review.get("promoted_at"),
+        })
+    counts = {v: sum(1 for i in items if i["verdict"] == v) for v in ("besser", "gleich", "schlechter")}
+    counts["unbewertet"] = sum(1 for i in items if i["frames_variant"] > 0 and not i["verdict"])
+    return {"variant": variant, "tasks": items, "counts": counts}
 
 
 @core.get("/api/task/{task_id:path}/label")

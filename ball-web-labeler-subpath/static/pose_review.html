@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpinEvo | Pose Review</title>
+  <script defer src="static/pose_review.js?v=1"></script>
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --line:#1f2937; --accent:#22d3ee;
+            --old:#f87171; --new:#4ade80; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
+    .wrap { max-width:1200px; margin:20px auto; padding:0 16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .btn { background:#1f2937; color:#e5e7eb; border:1px solid #374151; border-radius:10px; padding:8px 12px; cursor:pointer; }
+    .btn:hover { background:#374151; }
+    .btn.active { border-color: var(--accent); color: var(--accent); }
+    .btn.good { border-color:#14532d; } .btn.good.active { border-color:var(--new); color:var(--new); }
+    .btn.bad { border-color:#7f1d1d; } .btn.bad.active { border-color:var(--old); color:var(--old); }
+    .btn:disabled { opacity:.45; cursor:default; }
+    .muted { color:var(--muted); font-size:13px; }
+    .big { font-size:19px; font-weight:700; margin:0 0 8px 0; }
+    .pill { font-size:12px; border-radius:99px; padding:2px 10px; border:1px solid #374151; }
+    .pill.ok { color:var(--new); border-color:#14532d; }
+    .pill.warn { color:#fbbf24; border-color:#78350f; }
+    .legend { display:flex; gap:16px; align-items:center; font-size:13px; }
+    .sw { display:inline-block; width:14px; height:3px; border-radius:2px; vertical-align:middle; margin-right:6px; }
+    #frameImg { max-width:100%; max-height:66vh; display:block; border-radius:10px; }
+    #mediaWrap { position:relative; display:inline-block; line-height:0; }
+    #overlay { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
+    #diffList { display:flex; gap:6px; flex-wrap:wrap; }
+    #diffList .btn { padding:4px 9px; font-size:12px; font-family:ui-monospace, monospace; }
+    textarea { width:100%; background:#0b1220; color:#e5e7eb; border:1px solid #374151; border-radius:8px;
+               padding:8px; font:13px ui-sans-serif, system-ui; resize:vertical; min-height:44px; box-sizing:border-box; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="big">SpinEvo | Pose Review — alter vs. neuer Stand</h1>
+    <p class="muted">
+      Vergleicht die Pose-Daten <strong style="color:var(--old)">ALT (person_pose)</strong> mit der neu
+      berechneten <strong style="color:var(--new)">Variante (person_pose_v2)</strong>. Mit den
+      Abweichungs-Chips zu den größten Unterschieden springen, Urteil speichern — Promote übernimmt
+      die Variante als Hauptstand (mit Backup). Tasten: <strong>←/→</strong> Frame,
+      <strong>N/M</strong> ±10, <strong>D</strong> nächste Abweichung, <strong>P</strong> Play.
+    </p>
+
+    <div class="card row">
+      <a href="./rally-label" class="btn" style="text-decoration:none;">← Rally-Labeling</a>
+      <label>Task:
+        <select id="taskSelect"></select>
+      </label>
+      <button id="loadBtn" class="btn">Laden</button>
+      <span id="taskPill" class="pill">–</span>
+      <span id="status" class="muted">Bereit</span>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div id="frameInfo" class="muted">Frame - / -</div>
+        <div class="row">
+          <button id="prevBtn" class="btn">◀</button>
+          <button id="nextBtn" class="btn">▶</button>
+          <button id="playBtn" class="btn">▶ Play (P)</button>
+          <button id="diffBtn" class="btn">Nächste Abweichung (D)</button>
+          <label class="muted"><input type="checkbox" id="showOld" checked /> <span class="sw" style="background:var(--old)"></span>ALT</label>
+          <label class="muted"><input type="checkbox" id="showNew" checked /> <span class="sw" style="background:var(--new)"></span>NEU</label>
+        </div>
+      </div>
+      <input id="scrub" type="range" min="0" max="0" value="0" style="width:100%; margin:10px 0;" />
+      <div class="row" style="margin-bottom:8px;">
+        <span class="muted">Größte Abweichungen:</span>
+        <div id="diffList"></div>
+      </div>
+      <div id="mediaWrap">
+        <img id="frameImg" src="" alt="frame" />
+        <canvas id="overlay"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div class="row">
+          <span class="muted">Urteil:</span>
+          <button id="vBesser" class="btn good">Neu ist besser</button>
+          <button id="vGleich" class="btn">Gleichwertig</button>
+          <button id="vSchlechter" class="btn bad">Neu ist schlechter</button>
+        </div>
+        <div class="row">
+          <button id="saveReviewBtn" class="btn">Urteil speichern</button>
+          <button id="promoteBtn" class="btn" disabled>⬆ Promote (Variante übernehmen)</button>
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <textarea id="comment" placeholder="Kommentar (optional) – z. B. auffällige Stellen, Frames …"></textarea>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
