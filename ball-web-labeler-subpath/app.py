@@ -494,6 +494,18 @@ class RallySaveIn(BaseModel):
     sync_offset_frames: int = 0
 
 
+class RallyTableCalibIn(BaseModel):
+    """
+    Statische Tisch/Netz-Kalibrierung eines Rally-Tasks (Kamera steht fest,
+    daher ein Punktesatz pro Task, nicht pro Frame). Koordinaten in Quell-
+    Pixeln, gleiche Achsen wie points.csv / Ball-Overlay.
+    """
+    table: list[list[float]]              # genau 4 Ecken: Nahe L, Nahe R, Fern R, Fern L
+    net: list[list[float]] | None = None  # optional genau 2 Punkte: Netz L, Netz R
+    frame_width: float | None = None      # Quellauflösung beim Labeln (für spätere Normalisierung)
+    frame_height: float | None = None
+
+
 # ---------------------------------------------------------------------
 # FastAPI Apps (Core + Wrapper für Subpfad)
 # ---------------------------------------------------------------------
@@ -2020,6 +2032,7 @@ def api_rally_tasks():
                     "frames_total": frames_total,
                     "frames_with_label_file": None,
                     "has_rally_labels": rally_json.exists(),
+                    "has_table_calib": _rally_table_calib_path(td).exists(),
                 }
             )
             continue
@@ -2041,6 +2054,7 @@ def api_rally_tasks():
                 "frames_total": len(frames),
                 "frames_with_label_file": labeled,
                 "has_rally_labels": rally_json.exists(),
+                "has_table_calib": _rally_table_calib_path(td).exists(),
             }
         )
     return {"tasks": items}
@@ -2332,6 +2346,73 @@ def api_rally_task_video(task_id: str):
     playable = _resolve_playable_video_path(source, cache_dir)
     media_type = "video/mp4" if playable.suffix.lower() == ".mp4" else None
     return FileResponse(str(playable), media_type=media_type, content_disposition_type="inline")
+
+
+# ---------------------------------------------------------------------
+# Rally: statische Tisch/Netz-Kalibrierung pro Task
+# ---------------------------------------------------------------------
+
+def _rally_table_calib_path(td: Path) -> Path:
+    return td / "table_calib.json"
+
+
+def _valid_points(pts: list[list[float]], n: int) -> bool:
+    if not isinstance(pts, list) or len(pts) != n:
+        return False
+    for p in pts:
+        if not isinstance(p, list) or len(p) != 2:
+            return False
+        if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in p):
+            return False
+    return True
+
+
+@core.get("/api/rally/task/{task_id:path}/table-calib")
+def api_rally_task_get_table_calib(task_id: str):
+    """Statische Tisch/Netz-Kalibrierung des Tasks (ein Punktesatz, kein Frame-Bezug)."""
+    td = task_dir(task_id)
+    path = _rally_table_calib_path(td)
+    if not path.exists():
+        return {"task_id": task_id, "exists": False}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(500, "table_calib.json ist ungültig.")
+    return {"task_id": task_id, "exists": True, **{k: raw.get(k) for k in (
+        "table", "net", "frame_width", "frame_height", "point_order", "created_at")}}
+
+
+@core.post("/api/rally/task/{task_id:path}/table-calib")
+def api_rally_task_save_table_calib(task_id: str, body: RallyTableCalibIn):
+    td = task_dir(task_id)
+    if not _valid_points(body.table, 4):
+        raise HTTPException(400, "table braucht genau 4 Punkte [x,y] (Nahe L, Nahe R, Fern R, Fern L).")
+    if body.net is not None and not _valid_points(body.net, 2):
+        raise HTTPException(400, "net braucht genau 2 Punkte [x,y] (Netz L, Netz R) oder null.")
+    payload = {
+        "task_id": task_id,
+        "schema": "spinevo-table-calib/1",
+        "point_order": ["nahe_links", "nahe_rechts", "fern_rechts", "fern_links"],
+        "table": [[float(x), float(y)] for x, y in body.table],
+        "net": [[float(x), float(y)] for x, y in body.net] if body.net is not None else None,
+        "frame_width": float(body.frame_width) if body.frame_width else None,
+        "frame_height": float(body.frame_height) if body.frame_height else None,
+        "created_at": dt.datetime.utcnow().isoformat() + "Z",
+    }
+    _rally_table_calib_path(td).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return {"ok": True, "task_id": task_id, "has_net": payload["net"] is not None}
+
+
+@core.delete("/api/rally/task/{task_id:path}/table-calib")
+def api_rally_task_delete_table_calib(task_id: str):
+    td = task_dir(task_id)
+    path = _rally_table_calib_path(td)
+    existed = path.exists()
+    if existed:
+        path.unlink()
+    return {"ok": True, "task_id": task_id, "existed": existed}
 
 
 @core.get(

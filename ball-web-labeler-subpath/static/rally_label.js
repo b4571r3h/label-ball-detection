@@ -131,6 +131,13 @@
   const frameVideo = document.getElementById("frameVideo");
   const overlay = document.getElementById("overlay");
   const ctx = overlay.getContext("2d");
+  const tableBtn = document.getElementById("tableBtn");
+  const tableSaveBtn = document.getElementById("tableSaveBtn");
+  const tableCancelBtn = document.getElementById("tableCancelBtn");
+  const tableDeleteBtn = document.getElementById("tableDeleteBtn");
+  const tableShowChk = document.getElementById("tableShowChk");
+  const tableStatus = document.getElementById("tableStatus");
+  const tableHint = document.getElementById("tableHint");
 
   // ---------------------------------------------------------------------
   // State
@@ -146,6 +153,15 @@
   let playing = false;
   let videoDuration = 0;
   let framesPlayTimer = null; // Play-Loop für frames-Modus (kein <video>, daher Timer-basiert)
+
+  // Statische Tisch/Netz-Kalibrierung (ein Punktesatz pro Task, Quell-Pixel)
+  const TABLE_POINT_NAMES = [
+    "Nahe linke Tischecke", "Nahe rechte Tischecke",
+    "Ferne rechte Tischecke", "Ferne linke Tischecke",
+    "Netz links (Oberkante)", "Netz rechts (Oberkante)",
+  ];
+  let tableCalib = null;    // { table:[[x,y]×4], net:[[x,y]×2]|null } (gespeicherter Stand)
+  let tableCapture = null;  // Array der bisher geklickten Punkte, null = kein Aufnahme-Modus
   let suppressVideoSeek = false; // verhindert Rück-Feedback waehrend programmatischem Seek
 
   function totalFrames() {
@@ -269,19 +285,86 @@
     }
   }
 
+  // Projektion Quell-Pixel -> Canvas (gleiche Logik wie bisher in drawOverlay)
+  function projection() {
+    const { w: sw, h: sh } = sourceSize();
+    const scale = Math.min(overlay.width / sw, overlay.height / sh);
+    const ox = (overlay.width - sw * scale) / 2;
+    const oy = (overlay.height - sh * scale) / 2;
+    return { sw, sh, scale, ox, oy, project: (x, y) => ({ x: ox + x * scale, y: oy + y * scale }) };
+  }
+
+  function drawTableOverlay(project) {
+    const saved = tableCalib && tableShowChk.checked;
+    const pts = tableCapture !== null ? tableCapture : (saved ? tableCalib.table.concat(tableCalib.net || []) : null);
+    if (!pts || pts.length === 0) return;
+
+    const tablePts = pts.slice(0, 4).map(([x, y]) => project(x, y));
+    const netPts = pts.slice(4, 6).map(([x, y]) => project(x, y));
+
+    // Tischfläche (Polygon; während der Aufnahme als offener Linienzug)
+    if (tablePts.length >= 2) {
+      ctx.beginPath();
+      ctx.moveTo(tablePts[0].x, tablePts[0].y);
+      for (const p of tablePts.slice(1)) ctx.lineTo(p.x, p.y);
+      if (tablePts.length === 4) {
+        ctx.closePath();
+        ctx.fillStyle = "rgba(34,197,94,0.12)";
+        ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(34,197,94,0.9)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash(tableCapture !== null ? [6, 4] : []);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Netzlinie (gelabelt oder aus den Seitenmitten des Vierecks abgeleitet)
+    let netLine = netPts.length === 2 ? netPts : null;
+    if (!netLine && tablePts.length === 4 && tableCapture === null) {
+      netLine = [
+        { x: (tablePts[0].x + tablePts[3].x) / 2, y: (tablePts[0].y + tablePts[3].y) / 2 },
+        { x: (tablePts[1].x + tablePts[2].x) / 2, y: (tablePts[1].y + tablePts[2].y) / 2 },
+      ];
+    }
+    if (netLine) {
+      ctx.beginPath();
+      ctx.moveTo(netLine[0].x, netLine[0].y);
+      ctx.lineTo(netLine[1].x, netLine[1].y);
+      ctx.strokeStyle = "rgba(34,211,238,0.9)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash(netPts.length === 2 ? [] : [4, 4]); // gestrichelt = abgeleitet
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Punkte mit Nummern
+    pts.forEach(([x, y], i) => {
+      const p = project(x, y);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = i < 4 ? "rgba(34,197,94,0.95)" : "rgba(34,211,238,0.95)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 11px ui-sans-serif, system-ui";
+      ctx.fillText(String(i + 1), p.x + 7, p.y - 5);
+    });
+  }
+
   function drawOverlay() {
     const media = currentMediaEl();
     overlay.width = media.clientWidth || 1;
     overlay.height = media.clientHeight || 1;
     ctx.clearRect(0, 0, overlay.width, overlay.height);
 
+    const { project } = projection();
+    drawTableOverlay(project);
+
     const row = pointRowForDisplayIndex(index);
     if (!row) return;
-    const { w: sw, h: sh } = sourceSize();
-    const scale = Math.min(overlay.width / sw, overlay.height / sh);
-    const ox = (overlay.width - sw * scale) / 2;
-    const oy = (overlay.height - sh * scale) / 2;
-    const project = (x, y) => ({ x: ox + x * scale, y: oy + y * scale });
 
     if (row.x != null && row.y != null) {
       const p = project(row.x, row.y);
@@ -411,7 +494,7 @@
       for (const t of data.tasks || []) {
         const o = document.createElement("option");
         o.value = t.task_id;
-        o.textContent = `${t.task_id} (${t.frames_total} Frames${t.has_rally_labels ? " · Rally vorhanden" : ""})`;
+        o.textContent = `${t.task_id} (${t.frames_total} Frames${t.has_rally_labels ? " · Rally vorhanden" : ""}${t.has_table_calib ? " · Tisch" : ""})`;
         taskSelect.appendChild(o);
       }
     } catch (e) {
@@ -450,8 +533,10 @@
       events = (l.events || []).filter((e) => (e.kind === "start" || e.kind === "end") && Number.isInteger(e.frame));
       history = [];
       recalcByFrame();
+      await loadTableCalib();
       seekToFrame(0);
-      setStatus(`Task geladen: ${totalFrames()} Frames (Modus: ${mode})`);
+      setStatus(`Task geladen: ${totalFrames()} Frames (Modus: ${mode})`
+        + (tableCalib ? "" : " - Tipp: T = Tisch markieren"));
     } catch (e) {
       setStatus(String(e), true);
     }
@@ -469,6 +554,129 @@
     } catch (e) {
       setStatus(String(e), true);
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Tisch/Netz-Kalibrierung: 4 Ecken + optional 2 Netzpunkte, statisch pro
+  // Task (Kamera fest). Punkte in Quell-Pixeln, gleiche Achsen wie points.csv.
+  // ---------------------------------------------------------------------
+  function tableCalibUrl() {
+    return API(`/api/rally/task/${encodeURIComponent(taskId)}/table-calib`);
+  }
+
+  function updateTableUi() {
+    const capturing = tableCapture !== null;
+    tableBtn.style.display = capturing ? "none" : "";
+    tableSaveBtn.style.display = capturing && tableCapture.length >= 4 ? "" : "none";
+    tableCancelBtn.style.display = capturing ? "" : "none";
+    overlay.classList.toggle("capture", capturing);
+    tableHint.textContent = capturing && tableCapture.length < 6
+      ? `Klick ${tableCapture.length + 1}/6: ${TABLE_POINT_NAMES[tableCapture.length]} (U = Punkt zurück)`
+      : "";
+    if (tableCalib) {
+      tableStatus.textContent = tableCalib.net ? "Tisch + Netz gesetzt" : "Tisch gesetzt (Netz abgeleitet)";
+      tableStatus.classList.add("ok");
+      tableStatus.classList.remove("off");
+    } else {
+      tableStatus.textContent = "kein Label";
+      tableStatus.classList.remove("ok");
+      tableStatus.classList.add("off");
+    }
+  }
+
+  async function loadTableCalib() {
+    tableCalib = null;
+    tableCapture = null;
+    try {
+      const c = await jfetch(tableCalibUrl());
+      if (c.exists && Array.isArray(c.table)) {
+        tableCalib = { table: c.table, net: Array.isArray(c.net) ? c.net : null };
+      }
+    } catch (_) {
+      // Kalibrierung ist optional - Laden des Tasks nicht daran scheitern lassen
+    }
+    updateTableUi();
+  }
+
+  function startTableCapture() {
+    if (!taskId || totalFrames() === 0) {
+      setStatus("Erst einen Task laden.", true);
+      return;
+    }
+    tableCapture = [];
+    updateTableUi();
+    drawOverlay();
+    setStatus("Tisch markieren: 4 Ecken klicken, danach optional 2 Netzpunkte.");
+  }
+
+  function cancelTableCapture() {
+    tableCapture = null;
+    updateTableUi();
+    drawOverlay();
+    setStatus("Tisch-Markierung abgebrochen.");
+  }
+
+  function undoTablePoint() {
+    if (tableCapture === null || tableCapture.length === 0) return;
+    tableCapture.pop();
+    updateTableUi();
+    drawOverlay();
+  }
+
+  async function saveTableCalib() {
+    if (tableCapture === null || tableCapture.length < 4) return;
+    const { sw, sh } = projection();
+    const body = {
+      table: tableCapture.slice(0, 4),
+      net: tableCapture.length >= 6 ? tableCapture.slice(4, 6) : null,
+      frame_width: sw,
+      frame_height: sh,
+    };
+    try {
+      await jfetch(tableCalibUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      tableCalib = { table: body.table, net: body.net };
+      tableCapture = null;
+      updateTableUi();
+      drawOverlay();
+      setStatus(`Tisch-Kalibrierung gespeichert${body.net ? " (mit Netz)" : " (Netz wird aus dem Tisch abgeleitet)"}.`);
+    } catch (e) {
+      setStatus(String(e), true);
+    }
+  }
+
+  async function deleteTableCalib() {
+    if (!taskId || !tableCalib) return;
+    if (!window.confirm("Tisch/Netz-Kalibrierung dieses Tasks löschen?")) return;
+    try {
+      await jfetch(tableCalibUrl(), { method: "DELETE" });
+      tableCalib = null;
+      tableCapture = null;
+      updateTableUi();
+      drawOverlay();
+      setStatus("Tisch-Kalibrierung gelöscht.");
+    } catch (e) {
+      setStatus(String(e), true);
+    }
+  }
+
+  function onOverlayClick(e) {
+    if (tableCapture === null || tableCapture.length >= 6) return;
+    const rect = overlay.getBoundingClientRect();
+    const { sw, sh, scale, ox, oy } = projection();
+    const x = (e.clientX - rect.left - ox) / scale;
+    const y = (e.clientY - rect.top - oy) / scale;
+    if (x < 0 || y < 0 || x > sw || y > sh) return; // Klick im Letterbox-Rand
+    tableCapture.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+    if (tableCapture.length === 6) {
+      void saveTableCalib(); // alle 6 Punkte gesetzt -> direkt speichern
+      return;
+    }
+    updateTableUi();
+    drawOverlay();
   }
 
   // ---------------------------------------------------------------------
@@ -513,6 +721,12 @@
   undoBtn.addEventListener("click", undo);
   loadBtn.addEventListener("click", () => void loadTask());
   saveBtn.addEventListener("click", () => void saveTask());
+  tableBtn.addEventListener("click", startTableCapture);
+  tableSaveBtn.addEventListener("click", () => void saveTableCalib());
+  tableCancelBtn.addEventListener("click", cancelTableCapture);
+  tableDeleteBtn.addEventListener("click", () => void deleteTableCalib());
+  tableShowChk.addEventListener("change", drawOverlay);
+  overlay.addEventListener("click", onOverlayClick);
   scrub.addEventListener("input", () => seekToFrame(Number(scrub.value) || 0));
   frameImg.addEventListener("load", drawOverlay);
   frameVideo.addEventListener("timeupdate", onVideoTimeSync);
@@ -524,6 +738,8 @@
   window.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     const k = e.key.toLowerCase();
+    if (e.key === "Escape" && tableCapture !== null) { cancelTableCapture(); return; }
+    if (k === "u" && tableCapture !== null) { undoTablePoint(); return; } // U im Aufnahme-Modus: Punkt zurück
     if (e.key === "ArrowLeft" || k === "[") { e.preventDefault(); seekToFrame(index - 1); }
     if (e.key === "ArrowRight" || k === "]") { e.preventDefault(); seekToFrame(index + 1); }
     if (k === "n") seekToFrame(index - 10);
@@ -532,6 +748,7 @@
     if (k === "e") pushEvent("end");
     if (k === "d") deleteAtFrame();
     if (k === "u") undo();
+    if (k === "t") startTableCapture();
     if (k === "p") togglePlay();
   });
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Rally Labeling</title>
-  <script defer src="static/rally_label.js?v=2"></script>
+  <script defer src="static/rally_label.js?v=3"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --line:#1f2937; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -19,6 +19,10 @@
     #frameImg, #frameVideo { max-width:100%; max-height:72vh; display:block; border-radius:10px; }
     #mediaWrap { position:relative; display:inline-block; line-height:0; }
     #overlay { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
+    #overlay.capture { pointer-events:auto; cursor:crosshair; }
+    .pill { font-size:12px; border-radius:99px; padding:2px 10px; border:1px solid #374151; }
+    .pill.ok { color:#22c55e; border-color:#14532d; background:rgba(34,197,94,.08); }
+    .pill.off { color:#94a3b8; }
     #timeline { height:20px; background:#1f2937; border-radius:8px; position:relative; }
     .marker { position:absolute; top:0; bottom:0; width:2px; transform:translateX(-50%); }
     .start { background:#22c55e; }
@@ -31,7 +35,8 @@
     <h1 class="big">SpinEvo | Rally Labeling</h1>
     <p class="muted">
       Frames/Video laden, mit <strong>S</strong> Rally-Start und <strong>E</strong> Rally-Ende markieren,
-      <strong>U</strong> = Undo, dann speichern.
+      <strong>U</strong> = Undo, dann speichern. <strong>T</strong> = Tisch/Netz markieren
+      (statisch pro Task: 4 Tischecken, optional 2 Netzpunkte).
     </p>
 
     <div class="card row">
@@ -56,6 +61,18 @@
           <button id="deleteBtn" class="btn">Frame-Events löschen (D)</button>
           <button id="undoBtn" class="btn">Undo (U)</button>
         </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <span class="muted">Tisch/Netz:</span>
+        <span id="tableStatus" class="pill off">kein Label</span>
+        <button id="tableBtn" class="btn">Tisch markieren (T)</button>
+        <button id="tableSaveBtn" class="btn" style="display:none;">Ohne Netz speichern</button>
+        <button id="tableCancelBtn" class="btn" style="display:none;">Abbrechen (Esc)</button>
+        <button id="tableDeleteBtn" class="btn">Löschen</button>
+        <label class="muted" style="cursor:pointer;">
+          <input id="tableShowChk" type="checkbox" checked /> anzeigen
+        </label>
+        <span id="tableHint" class="muted"></span>
       </div>
       <input id="scrub" type="range" min="0" max="0" value="0" style="width:100%; margin:10px 0;" />
       <div id="timeline"></div>
