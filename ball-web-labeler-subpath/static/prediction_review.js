@@ -221,6 +221,8 @@
   const setLabel = document.getElementById("setLabel");
   const frameImg = document.getElementById("frameImg");
   const frameVideo = document.getElementById("frameVideo");
+  const mediaWrap = document.getElementById("mediaWrap");
+  const mediaNote = document.getElementById("mediaNote");
   const overlay = document.getElementById("overlay");
   const ctx = overlay.getContext("2d");
   const curveCanvas = document.getElementById("curveCanvas");
@@ -240,6 +242,7 @@
 
   let taskId = "";
   let mode = "video";
+  let hasMedia = false;     // Task hat Video bzw. Frames (sonst nur Kurven/Spuren)
   let sets = [];            // alle Prediction-Sets: [{tag, pred}]
   let activeSet = 0;        // Index des Sets, auf das sich Controls/Tabelle beziehen
   let pred = null;          // predictions-JSON des aktiven Sets
@@ -837,21 +840,32 @@
 
       applyActiveSet();
       mode = (meta && meta.mode) || "video";
-      frameVideo.style.display = mode === "video" ? "block" : "none";
-      frameImg.style.display = mode === "video" ? "none" : "block";
 
+      // Media ist optional: manche Tasks (z. B. reine Prediction-Uploads auf
+      // Export-CSVs) haben weder Frames noch Video – dann nur Kurven/Spuren.
       videoDuration = 0;
       frameFilenames = [];
+      hasMedia = false;
       if (mode === "video") {
-        await new Promise((resolve, reject) => {
-          frameVideo.onloadedmetadata = () => { videoDuration = frameVideo.duration || 0; resolve(); };
-          frameVideo.onerror = () => reject(new Error("Video konnte nicht geladen werden."));
-          frameVideo.src = API(`/api/rally/task/${encodeURIComponent(taskId)}/video`);
-        });
+        try {
+          await new Promise((resolve, reject) => {
+            frameVideo.onloadedmetadata = () => { videoDuration = frameVideo.duration || 0; resolve(); };
+            frameVideo.onerror = () => reject(new Error("Video konnte nicht geladen werden."));
+            frameVideo.src = API(`/api/rally/task/${encodeURIComponent(taskId)}/video`);
+          });
+          hasMedia = videoDuration > 0;
+        } catch (_) { /* ohne Video weiter */ }
       } else {
-        const p = await jfetch(API(`/api/rally/task/${encodeURIComponent(taskId)}/points`));
-        frameFilenames = (p.rows || []).map((r) => r.filename);
+        try {
+          const p = await jfetch(API(`/api/rally/task/${encodeURIComponent(taskId)}/points`));
+          frameFilenames = (p.rows || []).map((r) => r.filename);
+          hasMedia = frameFilenames.length > 0;
+        } catch (_) { /* ohne Frames weiter */ }
       }
+      frameVideo.style.display = hasMedia && mode === "video" ? "block" : "none";
+      frameImg.style.display = hasMedia && mode !== "video" ? "block" : "none";
+      mediaWrap.style.display = hasMedia ? "" : "none";
+      mediaNote.style.display = hasMedia ? "none" : "";
 
       rows = [];
       try {
@@ -869,7 +883,7 @@
       renderRallyList();
       renderMatchInfo();
       seekToFrame(0);
-      setStatus(`Geladen: ${totalFrames()} Frames, ${rallies.length} Rallies (Modus: ${mode})`);
+      setStatus(`Geladen: ${totalFrames()} Frames, ${rallies.length} Rallies (Modus: ${mode}${hasMedia ? "" : ", ohne Video/Frames"})`);
     } catch (e) {
       setStatus(String(e), true);
     }

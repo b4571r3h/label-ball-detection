@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SpinEvo | Prediction Review</title>
-  <script defer src="static/prediction_review.js?v=2"></script>
+  <script defer src="static/prediction_review.js?v=3"></script>
   <style>
     :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --line:#1f2937; --accent:#22d3ee; }
     body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system; background:var(--bg); color:#e5e7eb; }
@@ -70,6 +70,10 @@
         <video id="frameVideo" style="display:none;" playsinline></video>
         <canvas id="overlay"></canvas>
       </div>
+      <p id="mediaNote" class="muted" style="display:none; margin:12px 0 0 0;">
+        Dieser Task hat kein Video und keine Frames auf dem Server –
+        angezeigt werden nur Kurven, Segmente und der GT-Vergleich.
+      </p>
     </div>
 
     <div class="card" id="curveCard">
