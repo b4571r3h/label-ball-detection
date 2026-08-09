@@ -2578,10 +2578,33 @@ async def api_import_yolo_ball(request: Request, source: str = Query("upload")):
 # -------------------- Prediction-Review (spinevo Modell-Vorhersagen) --------------------
 
 PREDICTIONS_FILENAME = "predictions.json"
+PREDICTIONS_SETS_DIRNAME = "predictions_sets"
+DEFAULT_PREDICTION_SET_TAG = "default"
+_SET_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def _predictions_path(td: Path) -> Path:
     return td / PREDICTIONS_FILENAME
+
+
+def _prediction_set_path(td: Path, tag: str) -> Path:
+    return td / PREDICTIONS_SETS_DIRNAME / f"{tag}.json"
+
+
+def _iter_prediction_sets(td: Path):
+    """
+    Alle Prediction-Sets eines Tasks als (tag, path). Die klassische
+    predictions.json läuft als Set "default" mit; weitere Sets (z. B. neue
+    Modellstände via Upload-Feld set_tag) liegen unter predictions_sets/<tag>.json.
+    """
+    pf = _predictions_path(td)
+    if pf.exists():
+        yield DEFAULT_PREDICTION_SET_TAG, pf
+    sd = td / PREDICTIONS_SETS_DIRNAME
+    if sd.is_dir():
+        for p in sorted(sd.glob("*.json")):
+            if p.stem != DEFAULT_PREDICTION_SET_TAG:
+                yield p.stem, p
 
 
 def _existing_task_dir(task_id: str) -> Path:
@@ -2604,6 +2627,7 @@ async def api_predictions_upload(
     points_csv: UploadFile | None = File(None),
     task_id: str = Form(""),
     task_name: str = Form(""),
+    set_tag: str = Form(""),
 ):
     """
     Gegenstück zu spinevo dev/tcn/predict_video.py. Legt einen video-Modus-Task
@@ -2613,7 +2637,14 @@ async def api_predictions_upload(
     Rally-Label-Tool sichtbar → Ground-Truth nachlabeln und in
     /prediction-review vergleichen. Mit task_id werden die Vorhersagen an einen
     BESTEHENDEN Task gehängt (Video-Upload entfällt dann).
+
+    Mit set_tag (z. B. "hq_v002") wird die Vorhersage als ZUSÄTZLICHES Set unter
+    predictions_sets/<tag>.json gespeichert – die bestehende predictions.json
+    bleibt unangetastet. /prediction-review zeigt dann alle Sets nebeneinander.
     """
+    set_tag = set_tag.strip()
+    if set_tag and (set_tag == DEFAULT_PREDICTION_SET_TAG or not _SET_TAG_RE.match(set_tag)):
+        raise HTTPException(400, "set_tag: nur [A-Za-z0-9._-] (max 64), nicht 'default'.")
     try:
         pred = json.loads((await predictions.read()).decode("utf-8"))
     except Exception:
@@ -2642,11 +2673,17 @@ async def api_predictions_upload(
         (td / "points.csv").write_bytes(await points_csv.read())
 
     pred.setdefault("uploaded_at", dt.datetime.utcnow().isoformat() + "Z")
-    _predictions_path(td).write_text(json.dumps(pred, ensure_ascii=False), encoding="utf-8")
+    if set_tag:
+        target = _prediction_set_path(td, set_tag)
+        target.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        target = _predictions_path(td)
+    target.write_text(json.dumps(pred, ensure_ascii=False), encoding="utf-8")
 
     return {
         "ok": True,
         "task_id": task_id,
+        "set_tag": set_tag or DEFAULT_PREDICTION_SET_TAG,
         "rallies": len(pred.get("rallies", [])),
         "has_video": _rally_video_path(td) is not None,
         "has_points_csv": (td / "points.csv").exists(),
@@ -2655,36 +2692,54 @@ async def api_predictions_upload(
 
 @core.get("/api/predictions/tasks")
 def api_predictions_tasks():
-    """Alle Tasks mit predictions.json (Quelle für die /prediction-review-Seite)."""
+    """Alle Tasks mit Prediction-Sets (Quelle für die /prediction-review-Seite)."""
     out = []
     for tid, td in _iter_task_dirs():
-        pf = _predictions_path(td)
-        if not pf.exists():
-            continue
-        try:
-            pred = json.loads(pf.read_text(encoding="utf-8"))
-        except Exception:
+        sets = []
+        primary = None
+        for tag, path in _iter_prediction_sets(td):
+            try:
+                pred = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            model = pred.get("model") or {}
+            sets.append({
+                "tag": tag,
+                "uploaded_at": pred.get("uploaded_at"),
+                "n_rallies": len(pred.get("rallies", [])),
+                "checkpoint": model.get("tcn_checkpoint"),
+            })
+            if primary is None or tag == DEFAULT_PREDICTION_SET_TAG:
+                primary = pred
+        if primary is None:
             continue
         out.append({
             "task_id": tid,
             "mode": _rally_task_mode(td),
-            "uploaded_at": pred.get("uploaded_at"),
-            "source_video": pred.get("source_video"),
-            "num_frames": pred.get("num_frames"),
-            "n_rallies": len(pred.get("rallies", [])),
+            "uploaded_at": primary.get("uploaded_at"),
+            "source_video": primary.get("source_video"),
+            "num_frames": primary.get("num_frames"),
+            "n_rallies": len(primary.get("rallies", [])),
             "has_rally_labels": (td / "rally_labels.json").exists(),
+            "sets": sets,
         })
     out.sort(key=lambda t: t.get("uploaded_at") or "", reverse=True)
     return {"tasks": out}
 
 
 @core.get("/api/predictions/task/{task_id:path}")
-def api_predictions_task(task_id: str):
-    """Liefert die predictions.json eines Tasks."""
+def api_predictions_task(task_id: str, set: str = Query("", description="Set-Tag (leer = predictions.json)")):
+    """Liefert ein Prediction-Set eines Tasks (Standard: klassische predictions.json)."""
     td = _existing_task_dir(task_id)
-    pf = _predictions_path(td)
+    tag = set.strip() or DEFAULT_PREDICTION_SET_TAG
+    if tag == DEFAULT_PREDICTION_SET_TAG:
+        pf = _predictions_path(td)
+    else:
+        if not _SET_TAG_RE.match(tag):
+            raise HTTPException(400, "Ungültiger Set-Tag.")
+        pf = _prediction_set_path(td, tag)
     if not pf.exists():
-        raise HTTPException(404, "Keine predictions.json in diesem Task.")
+        raise HTTPException(404, f"Kein Prediction-Set '{tag}' in diesem Task.")
     return json.loads(pf.read_text(encoding="utf-8"))
 
 

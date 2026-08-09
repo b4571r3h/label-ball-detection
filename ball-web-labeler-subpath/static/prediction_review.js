@@ -216,9 +216,9 @@
   const nextBtn = document.getElementById("nextBtn");
   const playBtn = document.getElementById("playBtn");
   const scrub = document.getElementById("scrub");
-  const predStrip = document.getElementById("predStrip");
-  const gtRow = document.getElementById("gtRow");
-  const gtStrip = document.getElementById("gtStrip");
+  const stripsContainer = document.getElementById("stripsContainer");
+  const setSelect = document.getElementById("setSelect");
+  const setLabel = document.getElementById("setLabel");
   const frameImg = document.getElementById("frameImg");
   const frameVideo = document.getElementById("frameVideo");
   const overlay = document.getElementById("overlay");
@@ -240,7 +240,9 @@
 
   let taskId = "";
   let mode = "video";
-  let pred = null;          // predictions.json
+  let sets = [];            // alle Prediction-Sets: [{tag, pred}]
+  let activeSet = 0;        // Index des Sets, auf das sich Controls/Tabelle beziehen
+  let pred = null;          // predictions-JSON des aktiven Sets
   let rallies = [];         // aktuell angezeigte Rallies (Upload-Stand oder neu berechnet)
   let rows = [];            // points.csv
   let frameFilenames = [];  // frames-Modus
@@ -402,19 +404,27 @@
   }
 
   // ---------------------------------------------------------------------
-  // Timeline-Strips (Predicted + Ground Truth)
+  // Timeline-Strips (ein Strip pro Prediction-Set + Ground Truth)
   // ---------------------------------------------------------------------
+  const SET_COLORS = ["34,211,238", "168,85,247", "249,115,22", "250,204,21", "244,114,182"];
+  const GT_COLOR = "34,197,94";
+
+  function setColor(i) {
+    return SET_COLORS[i % SET_COLORS.length];
+  }
+
   function pct(frame) {
     const n = totalFrames();
     if (n <= 1) return 0;
     return (frame / (n - 1)) * 100;
   }
 
-  function renderStrip(el, segments, cls) {
+  function renderStrip(el, segments, rgb) {
     el.innerHTML = "";
     for (const [s, e] of segments) {
       const seg = document.createElement("div");
-      seg.className = `seg ${cls}`;
+      seg.className = "seg";
+      seg.style.background = `rgba(${rgb},0.55)`;
       const left = pct(s);
       const right = pct(e != null ? e : Math.min(totalFrames() - 1, s + 1));
       seg.style.left = `${left}%`;
@@ -431,10 +441,36 @@
     return rallies.map((r) => [r.start_frame, r.end_frame]);
   }
 
+  function setSegments(i) {
+    if (i === activeSet) return predSegments();
+    return ((sets[i] && sets[i].pred.rallies) || []).map((r) => [r.start_frame, r.end_frame]);
+  }
+
   function renderStrips() {
-    renderStrip(predStrip, predSegments(), "pred");
-    gtRow.style.display = gtSegments.length > 0 ? "flex" : "none";
-    if (gtSegments.length > 0) renderStrip(gtStrip, gtSegments, "gt");
+    stripsContainer.innerHTML = "";
+    const mkRow = (labelText, rgb, segments) => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.style.gap = "0";
+      row.style.marginBottom = "4px";
+      const lab = document.createElement("div");
+      lab.className = "stripLabel";
+      lab.textContent = labelText;
+      lab.title = labelText;
+      lab.style.color = `rgb(${rgb})`;
+      const strip = document.createElement("div");
+      strip.className = "strip";
+      row.appendChild(lab);
+      row.appendChild(strip);
+      stripsContainer.appendChild(row);
+      renderStrip(strip, segments, rgb);
+      strip.addEventListener("click", (e) => stripSeek(strip, e));
+    };
+    sets.forEach((s, i) => {
+      const mark = sets.length > 1 && i === activeSet ? " ●" : "";
+      mkRow(`${s.tag}${mark}`, setColor(i), setSegments(i));
+    });
+    if (gtSegments.length > 0) mkRow("GT", GT_COLOR, gtSegments);
   }
 
   function stripSeek(el, ev) {
@@ -515,12 +551,19 @@
       }
       c.stroke();
     };
+    // Nicht-aktive Sets: Kurve dünn in Set-Farbe (Vergleich auf einen Blick)
+    sets.forEach((s, i) => {
+      if (i === activeSet) return;
+      const arr = Array.isArray(s.pred.prob_in_rally) ? s.pred.prob_in_rally : s.pred.prob_start;
+      if (Array.isArray(arr)) drawLine(arr, `rgba(${setColor(i)},0.55)`, 1);
+    });
+    const ac = setColor(activeSet);
     if (stateMode) {
       // Roh dünn + geglättet fett
-      drawLine(ps, "rgba(34,211,238,0.35)", 1);
-      drawLine(boxSmooth1d(ps, Math.max(1, Number(smoothInput.value) || 1)), "rgba(34,211,238,0.95)", 2);
+      drawLine(ps, `rgba(${ac},0.35)`, 1);
+      drawLine(boxSmooth1d(ps, Math.max(1, Number(smoothInput.value) || 1)), `rgba(${ac},0.95)`, 2);
     } else {
-      drawLine(ps, "rgba(34,211,238,0.9)");
+      drawLine(ps, `rgba(${ac},0.9)`);
       drawLine(pe, "rgba(249,115,22,0.9)");
     }
 
@@ -598,26 +641,38 @@
     return segs;
   }
 
+  function meanStartDelta(rallyList) {
+    const diffs = gtSegments.map(([gs]) => {
+      let best = null;
+      for (const r of rallyList) {
+        const d = Math.abs(r.start_frame - gs);
+        if (best == null || d < best) best = d;
+      }
+      return best;
+    }).filter((d) => d != null);
+    return diffs.length ? diffs.reduce((a, b) => a + b, 0) / diffs.length : NaN;
+  }
+
   function renderMatchInfo() {
-    if (gtSegments.length === 0) {
+    if (gtSegments.length === 0 && sets.length <= 1) {
       matchInfo.textContent = pred && pred.model
         ? `Modell: ${JSON.stringify(pred.model)}`
         : "";
       return;
     }
     const f = fps();
-    const diffs = gtSegments.map(([gs]) => {
-      let best = null;
-      for (const r of rallies) {
-        const d = Math.abs(r.start_frame - gs);
-        if (best == null || d < best) best = d;
+    const parts = [];
+    if (gtSegments.length > 0) parts.push(`Ground Truth: ${gtSegments.length} Ballwechsel`);
+    sets.forEach((s, i) => {
+      const rl = i === activeSet ? rallies : (s.pred.rallies || []);
+      let txt = `${s.tag}: ${rl.length}`;
+      if (gtSegments.length > 0) {
+        const mean = meanStartDelta(rl);
+        if (Number.isFinite(mean)) txt += ` (|Δ Start| ${(mean / f).toFixed(2)}s)`;
       }
-      return best;
-    }).filter((d) => d != null);
-    const mean = diffs.length ? diffs.reduce((a, b) => a + b, 0) / diffs.length : NaN;
-    matchInfo.textContent =
-      `Ground Truth: ${gtSegments.length} Ballwechsel · Predicted: ${rallies.length} · ` +
-      `mittlere |Δ Start| zum nächsten Predicted-Start: ${Number.isFinite(mean) ? (mean / f).toFixed(2) + "s (" + mean.toFixed(1) + " Frames)" : "–"}`;
+      parts.push(txt);
+    });
+    matchInfo.textContent = parts.join(" · ");
   }
 
   // ---------------------------------------------------------------------
@@ -707,7 +762,8 @@
         o.value = t.task_id;
         const src = t.source_video ? ` · ${t.source_video}` : "";
         const gt = t.has_rally_labels ? " · GT vorhanden" : "";
-        o.textContent = `${t.task_id}${src} (${t.n_rallies} Rallies${gt})`;
+        const ns = Array.isArray(t.sets) && t.sets.length > 1 ? ` · ${t.sets.length} Sets` : "";
+        o.textContent = `${t.task_id}${src} (${t.n_rallies} Rallies${gt}${ns})`;
         taskSelect.appendChild(o);
       }
       if ((data.tasks || []).length === 0) setStatus("Noch keine Prediction-Uploads vorhanden.");
@@ -716,36 +772,70 @@
     }
   }
 
+  function applyActiveSet() {
+    pred = sets[activeSet].pred;
+    rallies = (pred.rallies || []).slice();
+    thrInput.value = String((pred.model && pred.model.threshold) || 0.35);
+    gapInput.value = String((pred.model && pred.model.min_gap_frames) || 15);
+
+    // Rally-State-Modus: eigene Post-Processing-Controls + Legende
+    const stateMode = isStateModel();
+    const pp = (pred.model && pred.model.postprocess) || {};
+    hystLabel.style.display = stateMode ? "" : "none";
+    smoothLabel.style.display = stateMode ? "" : "none";
+    minRallyLabel.style.display = stateMode ? "" : "none";
+    if (stateMode) {
+      smoothInput.value = String(pp.smooth_frames ?? 7);
+      hystInput.value = String(pp.hysteresis ?? 0.12);
+      minRallyInput.value = String(pp.min_rally_frames ?? 6);
+      gapInput.value = String(pp.min_gap_frames ?? 5);
+      if (pp.thr_center != null) thrInput.value = String(pp.thr_center);
+      else if (pp.threshold != null) thrInput.value = String(pp.threshold);
+      curveLegend.textContent = "(P(in Rally): dünn = roh, fett = geglättet; gestrichelt = Hysterese-Band)";
+    } else {
+      curveLegend.textContent = "(cyan = Start, orange = Ende)";
+    }
+  }
+
   async function loadTask() {
     taskId = taskSelect.value;
     if (!taskId) return;
     setStatus("Lade Task...");
     try {
-      pred = await jfetch(API(`/api/predictions/task/${encodeURIComponent(taskId)}`));
-      rallies = (pred.rallies || []).slice();
-      thrInput.value = String((pred.model && pred.model.threshold) || 0.35);
-      gapInput.value = String((pred.model && pred.model.min_gap_frames) || 15);
-
-      // Rally-State-Modus: eigene Post-Processing-Controls + Legende
-      const stateMode = isStateModel();
-      const pp = (pred.model && pred.model.postprocess) || {};
-      hystLabel.style.display = stateMode ? "" : "none";
-      smoothLabel.style.display = stateMode ? "" : "none";
-      minRallyLabel.style.display = stateMode ? "" : "none";
-      if (stateMode) {
-        smoothInput.value = String(pp.smooth_frames ?? 7);
-        hystInput.value = String(pp.hysteresis ?? 0.12);
-        minRallyInput.value = String(pp.min_rally_frames ?? 6);
-        gapInput.value = String(pp.min_gap_frames ?? 5);
-        if (pp.thr_center != null) thrInput.value = String(pp.thr_center);
-        else if (pp.threshold != null) thrInput.value = String(pp.threshold);
-        curveLegend.textContent = "(P(in Rally): dünn = roh, fett = geglättet; gestrichelt = Hysterese-Band)";
-      } else {
-        curveLegend.textContent = "(cyan = Start, orange = Ende)";
-      }
-
       const tl = await jfetch(API(`/api/predictions/tasks`));
       const meta = (tl.tasks || []).find((t) => t.task_id === taskId);
+
+      // Alle Prediction-Sets laden (klassische predictions.json = "default")
+      const setInfos = meta && Array.isArray(meta.sets) && meta.sets.length
+        ? meta.sets
+        : [{ tag: "default" }];
+      sets = [];
+      for (const si of setInfos) {
+        const q = si.tag && si.tag !== "default" ? `?set=${encodeURIComponent(si.tag)}` : "";
+        try {
+          const p = await jfetch(API(`/api/predictions/task/${encodeURIComponent(taskId)}${q}`));
+          sets.push({ tag: si.tag || "default", pred: p });
+        } catch (_) { /* Set nicht ladbar → überspringen */ }
+      }
+      if (sets.length === 0) throw new Error("Keine Prediction-Sets ladbar.");
+
+      // Aktiv = zuletzt hochgeladenes Set
+      activeSet = 0;
+      for (let i = 1; i < sets.length; i++) {
+        if ((sets[i].pred.uploaded_at || "") > (sets[activeSet].pred.uploaded_at || "")) activeSet = i;
+      }
+      setLabel.style.display = sets.length > 1 ? "" : "none";
+      setSelect.innerHTML = "";
+      sets.forEach((s, i) => {
+        const o = document.createElement("option");
+        o.value = String(i);
+        const ck = s.pred.model && s.pred.model.tcn_checkpoint ? ` · ${s.pred.model.tcn_checkpoint}` : "";
+        o.textContent = `${s.tag}${ck}`;
+        setSelect.appendChild(o);
+      });
+      setSelect.value = String(activeSet);
+
+      applyActiveSet();
       mode = (meta && meta.mode) || "video";
       frameVideo.style.display = mode === "video" ? "block" : "none";
       frameImg.style.display = mode === "video" ? "none" : "block";
@@ -827,8 +917,15 @@
   applyBtn.addEventListener("click", recomputeFromCurves);
   resetBtn.addEventListener("click", resetToUpload);
   scrub.addEventListener("input", () => seekToFrame(Number(scrub.value) || 0));
-  predStrip.addEventListener("click", (e) => stripSeek(predStrip, e));
-  gtStrip.addEventListener("click", (e) => stripSeek(gtStrip, e));
+  setSelect.addEventListener("change", () => {
+    if (sets.length === 0) return;
+    activeSet = Math.max(0, Math.min(sets.length - 1, Number(setSelect.value) || 0));
+    applyActiveSet();
+    playingRow = -1;
+    renderRallyList();
+    renderMatchInfo();
+    renderFrame();
+  });
   curveCanvas.addEventListener("click", curveSeek);
   frameImg.addEventListener("load", drawOverlay);
   frameVideo.addEventListener("timeupdate", onVideoTimeSync);
