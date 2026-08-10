@@ -8,7 +8,7 @@ Features
 - /api/ingest/upload:   MP4/MOV hochladen, Frames extrahieren
 - /api/ingest/youtube:  YouTube-URL ingest (yt-dlp), Frames extrahieren
 - /api/tasks:           Aufgaben (Tasks) auflisten
-- /api/task/{id}/frames:Frames für Task auflisten
+- /api/task/{id}/frames:Frames für Task auflisten (GET) / ZIP mit Frames in bestehenden Task laden (POST)
 - /api/task/{id}/frame/{name}: Bild ausliefern
 - /api/task/{id}/label: Klick speichern (YOLO .txt)
 - /api/task/{id}/label/empty: Negativ-Frame (leere .txt)
@@ -766,6 +766,65 @@ def api_save_youtube_video(url: str = Form(...), start_time: int = Form(0)):
 def api_task_frames(task_id: str):
     frames = list_frames(task_id)
     return {"task_id": task_id, "frames": frames}
+
+
+@core.post(
+    "/api/task/{task_id:path}/frames",
+    summary="Frames (ZIP mit *.jpg) in einen BESTEHENDEN Task hochladen",
+    dependencies=[Depends(require_export_bearer)],
+)
+async def api_task_upload_frames(task_id: str, request: Request, replace: bool = Query(False)):
+    """
+    Nimmt ein ZIP mit JPEGs als rohen Request-Body entgegen und legt sie im
+    frames/-Ordner eines bereits existierenden Tasks ab. Gedacht für Tasks, die
+    per /api/predictions/upload ohne Video/Frames angelegt wurden (z. B. die
+    reli-Tasks): die Frames werden lokal mit denselben Parametern wie
+    extract_frames() erzeugt und in mehreren ZIP-Chunks nachgereicht.
+
+    Die Dateinamen bestimmen die Reihenfolge (sortiert) und damit den
+    Frame-Index in /api/rally/task/{id}/points(.csv) – also z. B. 000001.jpg …
+    passend zu den Frame-Nummern der Rally-Labels/Predictions.
+
+    ?replace=true leert frames/ vorher (Labels bleiben unangetastet).
+    """
+    td = _existing_task_dir(task_id)
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "Leerer Request-Body (ZIP erwartet).")
+
+    frames_dir = td / "frames"
+    if replace and frames_dir.is_dir():
+        shutil.rmtree(frames_dir)
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="frames-upload-"))
+    try:
+        zip_path = tmp_dir / "upload.zip"
+        zip_path.write_bytes(body)
+        try:
+            zf = zipfile.ZipFile(zip_path)
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "Ungültiges ZIP.")
+        with zf:
+            names = [n for n in zf.namelist() if n.lower().endswith((".jpg", ".jpeg"))]
+            if not names:
+                raise HTTPException(400, "ZIP enthält keine *.jpg.")
+            written = 0
+            for name in sorted(names):
+                # nur der Basisname, keine Verzeichnisse aus dem ZIP übernehmen
+                target = frames_dir / f"{Path(name).stem}.jpg"
+                target.write_bytes(zf.read(name))
+                written += 1
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "written": written,
+        "frames_total": len(list(frames_dir.glob("*.jpg"))),
+    }
 
 
 @core.get("/api/task/{task_id:path}/frames-status")
