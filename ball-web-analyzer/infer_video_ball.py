@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-import argparse, cv2, numpy as np, subprocess, sys
+import argparse
+import cv2
+import subprocess
+import sys
 from pathlib import Path
 from ultralytics import YOLO
 
@@ -42,7 +45,8 @@ def main():
 
     while True:
         ok, frame = cap.read()
-        if not ok: break
+        if not ok:
+            break
 
         results = model.predict(frame, conf=args.conf, imgsz=args.imgsz, verbose=False)
         for r in results:

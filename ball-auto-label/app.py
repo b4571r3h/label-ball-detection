@@ -12,7 +12,14 @@ Umgebungsvariablen:
   MAX_FRAMES       Max Frames pro Video     (default: 500)
 """
 
-import os, json, uuid, threading, base64, time, secrets, subprocess
+import os
+import json
+import uuid
+import threading
+import base64
+import time
+import secrets
+import subprocess
 from pathlib import Path
 
 import cv2

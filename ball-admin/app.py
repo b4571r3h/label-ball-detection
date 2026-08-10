@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import List, Dict, Any
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Response, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -340,7 +340,7 @@ def api_analyzer_analyses():
             # Erstellungszeit (aus Verzeichnisname oder mtime)
             try:
                 created = datetime.fromtimestamp(analysis_dir.stat().st_mtime).isoformat()
-            except:
+            except Exception:
                 created = "unknown"
             
             # Gesamtgröße

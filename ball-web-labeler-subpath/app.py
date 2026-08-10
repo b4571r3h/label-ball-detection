@@ -60,7 +60,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response, Query, Depends, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends, Request
 from fastapi.responses import FileResponse, RedirectResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -2290,7 +2290,7 @@ def _build_rally_timeseries_csv_from_points_csv(points_csv: Path, event_map: dic
     durch und hängt nur die `label`-Spalte an (0..3, wie im frames-Modus).
     """
     text = points_csv.read_text(encoding="utf-8")
-    lines = [l for l in text.split("\n") if l != ""]
+    lines = [ln for ln in text.split("\n") if ln != ""]
     if not lines:
         return "frame,x,y,confidence,label\n"
     out = io.StringIO()
@@ -3315,8 +3315,8 @@ def api_task_export(task_id: str):
     try:
         for f in frames:
             zf.write(f, arcname=f"images/{f.name}")
-        for l in labels:
-            zf.write(l, arcname=f"labels/{l.name}")
+        for lbl in labels:
+            zf.write(lbl, arcname=f"labels/{lbl.name}")
 
         # Einfaches dataset.yaml hinzufügen (einzelne Klasse)
         dataset_yaml = (

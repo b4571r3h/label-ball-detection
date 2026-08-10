@@ -16,7 +16,12 @@ Usage:
       --conf 0.25 --imgsz 640 --calib table_calib.json --save_heatmap heatmap.png \
       --save_csv bounces.csv --save_preview preview.mp4
 """
-import argparse, json, sys, io, contextlib, shutil, tempfile
+import argparse
+import json
+import io
+import contextlib
+import shutil
+import tempfile
 from pathlib import Path
 import numpy as np
 import cv2

@@ -17,7 +17,9 @@ for lbl in LBL_DIR.glob("*.txt"):
         img = None
         for ext in (".jpg", ".png", ".jpeg"):
             p = IMG_DIR / f"{stem}{ext}"
-            if p.exists(): img = p; break
+            if p.exists():
+                img = p
+                break
         if img:
             shutil.move(str(img), OUT_IMG / img.name)
         shutil.move(str(lbl), OUT_LBL / lbl.name)

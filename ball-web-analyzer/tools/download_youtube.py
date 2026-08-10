@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-import argparse, tempfile, sys
+import argparse
+import tempfile
 from pathlib import Path
-import contextlib, io, shutil
+import contextlib
+import io
+import shutil
 
 def is_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")

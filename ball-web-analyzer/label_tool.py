@@ -18,10 +18,9 @@ Simple Ball Labeler (YOLO format)
 Usage:
     python label_tool.py --images data/ball_det/images/train --labels data/ball_det/labels/train
 """
-import argparse, os
+import argparse
 from pathlib import Path
 import cv2
-import glob
 
 def yolo_to_xyxy(yolo_line, w, h):
     cls, x, y, bw, bh = map(float, yolo_line.strip().split())
@@ -66,7 +65,8 @@ class Labeler:
         if ypath.exists():
             with open(ypath, "r") as f:
                 for line in f:
-                    if not line.strip(): continue
+                    if not line.strip():
+                        continue
                     cls, x1, y1, x2, y2 = yolo_to_xyxy(line, W, H)
                     boxes.append((x1,y1,x2,y2, int(cls)))
         return boxes

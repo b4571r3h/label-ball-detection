@@ -7,7 +7,6 @@ Analysiert Videos mit trainiertem YOLO-Modell und erstellt Bounce-Heatmaps
 import os
 import json
 import shutil
-import tempfile
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +20,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 
 logger = logging.getLogger(__name__)
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -499,7 +498,7 @@ def list_analyses():
                             rel_id = str(analysis_dir_path.relative_to(DATA_DIR)).replace(os.sep, "/")
                             meta["analysis_id"] = rel_id
                             analyses.append(meta)
-                        except:
+                        except Exception:
                             pass
     
     # Nach Datum sortieren

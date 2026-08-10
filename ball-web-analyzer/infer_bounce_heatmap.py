@@ -187,7 +187,7 @@ def main():
     FPS = cap.get(cv2.CAP_PROP_FPS) or 30.0
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    N = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    _n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
     # Calibration: load or create
     if Path(args.calib).exists():

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-import argparse, cv2, os, subprocess, sys
+import argparse
+import cv2
+import subprocess
+import sys
 from pathlib import Path
 
 def is_url(s: str) -> bool:
@@ -7,7 +10,6 @@ def is_url(s: str) -> bool:
 
 def resolve_video_path(src: str) -> str:
     from pathlib import Path
-    import subprocess, sys
     if src.startswith("http://") or src.startswith("https://"):
         here = Path(__file__).resolve().parent
         py = sys.executable
@@ -37,7 +39,8 @@ def main():
     stem = Path(video_path).stem
     while True:
         ok, frame = cap.read()
-        if not ok: break
+        if not ok:
+            break
         if idx % step == 0:
             out_name = f"{stem}_{idx:08d}.jpg"
             cv2.imwrite(str(Path(args.out)/out_name), frame)
